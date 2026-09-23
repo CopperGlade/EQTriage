@@ -5,6 +5,7 @@ Author: Sebik <Europa>
 
 import argparse
 import codecs
+import collections
 import csv
 import ctypes
 import json
@@ -18,6 +19,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.request
 import wave
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, QUrl
@@ -54,6 +56,7 @@ DISTANCE_STEP = 10
 CHARM_BREAK_PREFIX = 'CHARM BREAK '
 CHARMER_HIT_PREFIX = 'CHARMER HIT '
 UNTAGGED_PREFIXES = ('DEAD ', CHARM_BREAK_PREFIX)
+DROP_MARKED_PREFIXES = ('', CHARMER_HIT_PREFIX)
 SCAN_SECONDS = 5.0
 ZEAL_GRACE_SECONDS = 20.0
 EQ_PROCESS = 'eqgame.exe'
@@ -63,6 +66,7 @@ STATUS_WAIT = '#8a93a3'
 REFRESH_MS = 100
 STATUS_MS = 1000
 CONTROL_WIDTH = 340
+NOTE_SPACING = 8
 PIN_LIST_HEIGHT = 90
 TEST_BUTTON_WIDTH = 28
 CUSTOM_ITEM_TEXT = 'Custom file\u2026'
@@ -92,6 +96,22 @@ SAMPLE_ROWS = [
     ('', 'Sebik', ' pet 41%', LOW_HP_COLOR, None),
     ('', 'Sebik', ' 38% (150 away)', LOW_HP_COLOR, None),
 ]
+# Dropping fast: HP lost per second, measured over a short window and held briefly so the marker doesn't flicker.
+DROP_MARKER = ' \u25bc'
+DROP_WINDOW_SECONDS = 1.0
+DROP_MIN_SPAN_SECONDS = 0.5
+DROP_HOLD_SECONDS = 1.5
+DROP_PROJECT_SECONDS = 2.0
+DEFAULT_DROP_RATE = 10
+DROP_RATE_RANGE = (3, 50)
+# Watch setting: every raid member, only the active character's raid group, or chosen raid groups.
+FOCUS_ALL = 'all'
+FOCUS_MINE = 'mine'
+FOCUS_GROUPS = 'groups'
+RAID_GROUPS = 12
+RAID_GROUP_COLUMNS = 4
+FOCUS_GROUPS_TEXT = 'Chosen groups\u2026'
+FOCUS_CHOICES = (('Whole raid', FOCUS_ALL), ('My group', FOCUS_MINE), (FOCUS_GROUPS_TEXT, FOCUS_GROUPS))
 # Pins are capped at the most rows the overlay can show; with fewer rows set, only the first pins fit.
 MAX_PINS = 25
 DEFAULT_Y = 150
@@ -117,6 +137,10 @@ APP_DIR = os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else o
 POSITION_FILE = os.path.join(APP_DIR, 'position.json')
 PINS_FILE = os.path.join(APP_DIR, 'pins.json')
 DOCS_URL = 'https://github.com/CopperGlade/EQTriage#readme'
+LATEST_RELEASE_API = 'https://api.github.com/repos/CopperGlade/EQTriage/releases/latest'
+UPDATE_TIMEOUT_SECONDS = 10
+# version_info.txt is the single source of the version; the build bundles it into the exe's unpack directory.
+BUNDLE_DIR = getattr(sys, '_MEIPASS', APP_DIR)
 SETTINGS_FILE = os.path.join(APP_DIR, 'settings.json')
 # Setting key -> (default, minimum, maximum, label in the control window, suffix shown after the value).
 SETTINGS = {
@@ -164,6 +188,7 @@ EVENTS = {
     'critical': ('Critical health (red)', True, False),
     'charm_break': ('Charm break', True, True),
     'charmer_hit': ('Charmer hit', True, True),
+    'dropping': ('Dropping fast (\u25bc)', True, False),
     'death': ('Death', True, False),
     'pets': ('Pets in the list', True, None),
 }
@@ -175,10 +200,11 @@ DEFAULT_SOUNDS = {
     'critical': 'double_chirp',
     'charm_break': 'rising_chime',
     'charmer_hit': 'klaxon',
+    'dropping': 'alarm_pulses',
     'death': 'low_gong',
 }
 # Only one sound plays at a time, so when several events start together the most urgent one is heard.
-SOUND_PRIORITY = ('charmer_hit', 'charm_break', 'death', 'critical', 'low')
+SOUND_PRIORITY = ('charmer_hit', 'charm_break', 'death', 'dropping', 'critical', 'low')
 SOUND_REPEAT_SECONDS = 10.0
 # 44.1 kHz keeps the bells' high partials below the Nyquist limit, so they don't alias into harsh tones.
 SOUND_RATE = 44100
@@ -203,12 +229,16 @@ own_locations = {}
 member_locations = {}
 charmer_hits = {}
 hp_seen = {}
+hp_history = {}
+dropping_until = {}
 member_classes = {}
+raid_groups = {}
 connected = set()
 pipe_characters = {}
 member_messages = {}
 eq_started = None
 verbose_missing = False
+newer_release = None
 
 
 def is_watched(name, now):
@@ -241,6 +271,9 @@ def handle_members(entries, pipe_name):
                 member_locations[(pipe_name, entry['name'])] = (location(entry['loc']), now)
             if entry.get('class') in CLASSES:
                 member_classes[entry['name']] = entry['class']
+            # Only raid entries carry a group: its number as text ("1" to "12"), or "Ungrouped".
+            if 'group' in entry:
+                raid_groups[entry['name']] = (str(entry['group']), now)
             if 'hp_current' not in entry:
                 # Raid members outside the zone carry no spawn_id and never have HP; one in the zone
                 # without HP means /pipeverbose is off.
@@ -254,6 +287,10 @@ def handle_members(entries, pipe_name):
             if maximum <= 0:
                 continue
             members[name] = (current * 100 / maximum, now)
+            history = hp_history.setdefault(name, collections.deque())
+            history.append((now, current * 100 / maximum))
+            while history and now - history[0][0] > DROP_WINDOW_SECONDS:
+                history.popleft()
             # Compared per client: another client's view can lag, and regen then looks like damage.
             previous = hp_seen.get((pipe_name, name))
             hp_seen[(pipe_name, name)] = (current, maximum)
@@ -463,14 +500,30 @@ def limits(settings, name, pet=False):
     return threshold['list'], threshold['red']
 
 
-def listed(readings, settings, now, pet=False):
+def drop_rate(name):
+    # HP % lost per second across the recent window, or 0 without enough history. Needs state_lock.
+    history = hp_history.get(name)
+    if not history:
+        return 0.0
+    (start, start_pct), (end, end_pct) = history[0], history[-1]
+    if end - start < DROP_MIN_SPAN_SECONDS:
+        return 0.0
+    return (start_pct - end_pct) / (end - start)
+
+
+def listed(readings, settings, now, pet=False, dropping=None):
     # (distance above their critical level, HP %, name, critical level) for each fresh reading below its warning
-    # level whose band is switched on. Sorting by distance puts whoever is closest to their own critical level first.
+    # level whose band is switched on, plus anyone dropping fast even above it. Sorting by distance puts whoever is
+    # closest to their own critical level first; for someone dropping fast the distance is measured from where they
+    # will be a moment from now at their current rate, so a fast fall ranks above a slow low.
+    dropping = dropping or {}
     entries = []
     for name, (pct, seen) in readings.items():
         list_hp, red_hp = limits(settings, name, pet)
-        if now - seen < STALE_SECONDS and pct < list_hp and settings['show']['critical' if pct < red_hp else 'low']:
-            entries.append((pct - red_hp, pct, name, red_hp))
+        banded = pct < list_hp and settings['show']['critical' if pct < red_hp else 'low']
+        if now - seen < STALE_SECONDS and (banded or name in dropping):
+            projected = pct - dropping.get(name, 0) * DROP_PROJECT_SECONDS
+            entries.append((projected - red_hp, pct, name, red_hp))
     return sorted(entries)
 
 
@@ -501,6 +554,11 @@ def distance_to(name, origin, now):
     return math.dist(own[0], theirs[0])
 
 
+def with_drop_marker(row):
+    prefix, name, suffix, color, key = row
+    return prefix, name, suffix + DROP_MARKER, color, key
+
+
 def with_distance(row, distance):
     prefix, name, suffix, color, key = row
     if distance == math.inf:
@@ -525,9 +583,48 @@ def snapshot(settings, now):
         owner for owner, (_, at) in charm_breaks.items()
         if now - at < ALERT_SECONDS and owner not in charmers_hit and owner not in dead
     ] if show['charm_break'] else []
-    low = listed(members, settings, now)
+    rates = {name: drop_rate(name) for name in hp}
+    for name, rate in rates.items():
+        if rate >= settings['drop_rate']:
+            dropping_until[name] = now + DROP_HOLD_SECONDS
+    # Name -> current rate for everyone marked as dropping fast.
+    dropping = {}
+    if show['dropping']:
+        dropping = {name: max(rates[name], 0) for name, until in dropping_until.items() if until > now and name in hp}
+    low = listed(members, settings, now, dropping=dropping)
     low_pets = listed(pet_hp, settings, now, pet=True) if show['pets'] else []
-    return hp, member_limits, dead, charmers_hit, breaks, low, low_pets
+    return hp, member_limits, dead, charmers_hit, breaks, low, low_pets, dropping
+
+
+def focus_filter(settings, origin, now):
+    # Which players the Watch setting keeps: None keeps everyone. Raid groups only exist in a raid, so outside one
+    # nothing is filtered, and a player without raid data (e.g. only in your group) is always kept. Needs state_lock.
+    if settings['focus'] == FOCUS_ALL:
+        return None
+    groups = {name: group for name, (group, seen) in raid_groups.items() if now - seen < STALE_SECONDS}
+    if not groups:
+        return None
+    if settings['focus'] == FOCUS_MINE:
+        # Your raid group is that of the character in the active EQ window, so it follows you between boxes.
+        mine = groups.get(pipe_characters.get(origin))
+        if mine is None:
+            return None
+        wanted = {mine}
+    else:
+        wanted = {str(group) for group in settings['focus_groups']}
+    return lambda name: name not in groups or groups[name] in wanted
+
+
+def apply_focus(keep, dead, charmers_hit, breaks, low, low_pets):
+    if keep is None:
+        return dead, charmers_hit, breaks, low, low_pets
+    return (
+        [name for name in dead if keep(name)],
+        [name for name in charmers_hit if keep(name)],
+        [name for name in breaks if keep(name)],
+        [entry for entry in low if keep(entry[2])],
+        [entry for entry in low_pets if keep(entry[2])],
+    )
 
 
 def padded(rows, count):
@@ -539,7 +636,10 @@ def alert_rows(settings, pinned, origin=None):
     with state_lock:
         distances = {name: distance_to(name, origin, now) for name in members}
         far = {name: d for name, d in distances.items() if d is not None and d > settings['range']}
-        hp, member_limits, dead, charmers_hit, breaks, low, low_pets = snapshot(settings, now)
+        hp, member_limits, dead, charmers_hit, breaks, low, low_pets, dropping = snapshot(settings, now)
+        keep = focus_filter(settings, origin, now)
+    # Pinned players are shown whatever the Watch setting; everything else follows it.
+    dead, charmers_hit, breaks, low, low_pets = apply_focus(keep, dead, charmers_hit, breaks, low, low_pets)
     # Each row is (prefix, name, suffix, color, pin key). Only the name is shortened when a row is too wide,
     # and the pin key is the player a click on the row's pin toggles (None for pets and empty rows).
     flagged = [name for name in charmers_hit + breaks + dead if name not in pinned]
@@ -551,6 +651,7 @@ def alert_rows(settings, pinned, origin=None):
         ('', name, f'{label} {int(pct)}%', hp_color(pct, red_hp), key)
         for _, pct, name, label, red_hp, key in sorted(players + pets, key=lambda row: row[:4])
     ]
+    rows = [with_drop_marker(row) if row[4] in dropping and row[0] in DROP_MARKED_PREFIXES else row for row in rows]
     if settings['distance_warning']:
         rows = [with_distance(row, far[row[4]]) if row[4] in far and row[0] not in UNTAGGED_PREFIXES else row
                 for row in rows]
@@ -559,7 +660,15 @@ def alert_rows(settings, pinned, origin=None):
     return padded(rows, settings['rows'])
 
 
-def current_events(settings):
+def limits_by_name(settings, name):
+    # Warning level for an event's name; pets carry " pet" after the owner's name.
+    with state_lock:
+        if name.endswith(' pet'):
+            return limits(settings, name[:-len(' pet')], pet=True)[0]
+        return limits(settings, name)[0]
+
+
+def current_events(settings, origin=None):
     # (event type, who) for everything alerting right now; sounds play when a new one appears. Showing on the
     # overlay and playing a sound are independent, so an alert type counts here if either is switched on.
     now = time.monotonic()
@@ -567,12 +676,17 @@ def current_events(settings):
         key: shown or settings['sound'].get(key, False) for key, shown in settings['show'].items()
     })
     with state_lock:
-        _, _, dead, charmers_hit, breaks, low, low_pets = snapshot(audible, now)
+        _, _, dead, charmers_hit, breaks, low, low_pets, dropping = snapshot(audible, now)
+        keep = focus_filter(settings, origin, now)
+    dead, charmers_hit, breaks, low, low_pets = apply_focus(keep, dead, charmers_hit, breaks, low, low_pets)
     events = {('death', name) for name in dead}
+    events |= {('dropping', name) for name in dropping if keep is None or keep(name)}
     events |= {('charmer_hit', name) for name in charmers_hit}
     events |= {('charm_break', name) for name in breaks}
     for _, pct, name, red_hp in low + [(m, pct, f'{owner} pet', red_hp) for m, pct, owner, red_hp in low_pets]:
-        events.add(('critical' if pct < red_hp else 'low', name))
+        list_hp = limits_by_name(settings, name)
+        if pct < list_hp:
+            events.add(('critical' if pct < red_hp else 'low', name))
     return events
 
 
@@ -782,6 +896,14 @@ def load_settings():
     settings['thresholds'] = load_thresholds(saved)
     settings['locked'] = saved.get('locked') is True
     settings['distance_warning'] = saved.get('distance_warning') is not False
+    rate = saved.get('drop_rate')
+    valid = isinstance(rate, (int, float)) and not isinstance(rate, bool)
+    settings['drop_rate'] = min(max(int(rate), DROP_RATE_RANGE[0]), DROP_RATE_RANGE[1]) if valid else DEFAULT_DROP_RATE
+    settings['focus'] = saved.get('focus') if saved.get('focus') in (FOCUS_ALL, FOCUS_MINE, FOCUS_GROUPS) else FOCUS_ALL
+    groups = saved.get('focus_groups') if isinstance(saved.get('focus_groups'), list) else []
+    settings['focus_groups'] = sorted({g for g in groups if isinstance(g, int) and 1 <= g <= RAID_GROUPS})
+    if settings['focus'] == FOCUS_GROUPS and not settings['focus_groups']:
+        settings['focus'] = FOCUS_ALL
     settings.update(event_defaults(saved))
     return settings
 
@@ -914,7 +1036,7 @@ class TriageWindow(QWidget):
     def refresh(self):
         rows = self.current_rows()
         if not self.previewing():
-            self.sounds.update(self.settings, current_events(self.settings))
+            self.sounds.update(self.settings, current_events(self.settings, self.active_pipe()))
         cursor = self.mapFromGlobal(QCursor.pos())
         if rows != self.rows:
             self.rows = rows
@@ -1061,6 +1183,35 @@ class TriageWindow(QWidget):
             self.return_focus()
 
 
+def read_app_version():
+    with open(os.path.join(BUNDLE_DIR, 'version_info.txt'), encoding='utf-8') as file:
+        return re.search(r"ProductVersion', '([0-9.]+)'", file.read()).group(1)
+
+
+APP_VERSION = read_app_version()
+
+
+def version_tuple(text):
+    return tuple(int(part) for part in re.findall(r'\d+', text))
+
+
+def check_for_update():
+    # Asks GitHub once for the latest published release. Offline or rate-limited just means no notice.
+    global newer_release
+    request = urllib.request.Request(LATEST_RELEASE_API, headers={
+        'Accept': 'application/vnd.github+json', 'User-Agent': f'EQTriage/{APP_VERSION}',
+    })
+    try:
+        with urllib.request.urlopen(request, timeout=UPDATE_TIMEOUT_SECONDS) as response:
+            release = json.load(response)
+        tag, url = release['tag_name'], release['html_url']
+    except (OSError, ValueError, KeyError, TypeError):
+        return
+    if version_tuple(tag) > version_tuple(APP_VERSION):
+        with state_lock:
+            newer_release = (tag.lstrip('v'), url)
+
+
 def feed_status():
     # Plain-language state of the Zeal feed for the EQ Triage window, most urgent problem first.
     now = time.monotonic()
@@ -1108,13 +1259,17 @@ class ControlWindow(QWidget):
         self.setWindowTitle(APP_NAME)
         self.setFixedWidth(CONTROL_WIDTH)
         intro = QLabel(
-            f'<b>{APP_NAME}</b>: a healer\'s overlay for Project Quarm. Low health, charm breaks, deaths and range '
-            'at a glance.'
+            f'<b>{APP_NAME}</b> {APP_VERSION}: a healer\'s overlay for Project Quarm. Low health, charm breaks, '
+            'deaths and range at a glance.'
         )
         intro.setWordWrap(True)
         self.status = QLabel()
         self.status.setTextFormat(Qt.RichText)
         self.status.setWordWrap(True)
+        self.update_notice = QLabel()
+        self.update_notice.setTextFormat(Qt.RichText)
+        self.update_notice.setOpenExternalLinks(True)
+        self.update_notice.hide()
 
         self.spins = {}
         overlay_box = QGroupBox('Overlay')
@@ -1154,6 +1309,15 @@ class ControlWindow(QWidget):
         alerts_buttons.addWidget(alert_types_button)
         alerts_buttons.addWidget(thresholds_button)
         alerts_form = QFormLayout()
+        self.focus_picker = QComboBox()
+        for text, focus in FOCUS_CHOICES:
+            self.focus_picker.addItem(text, focus)
+        self.focus_picker.setToolTip('In a raid, list everyone, only your own raid group (the character in the active '
+                                     'EQ window), or chosen raid groups. Pinned players always show.')
+        # "activated" also fires when the already-selected item is picked again, so chosen groups can be re-edited.
+        self.focus_picker.activated.connect(self.pick_focus)
+        alerts_form.addRow('Watch', self.focus_picker)
+        self.show_focus()
         self.distance_box = QCheckBox(SETTINGS['range'][3])
         self.distance_box.setToolTip('Show how far away listed players are when they are farther than this, '
                                      'e.g. (150 away), or (other zone).')
@@ -1204,6 +1368,7 @@ class ControlWindow(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(intro)
         layout.addWidget(self.status)
+        layout.addWidget(self.update_notice)
         layout.addWidget(overlay_box)
         layout.addWidget(alerts_box)
         layout.addWidget(pins_box)
@@ -1234,6 +1399,27 @@ class ControlWindow(QWidget):
         self.spins[key] = spin
         return spin
 
+    def pick_focus(self):
+        settings = self.overlay.settings
+        focus = self.focus_picker.currentData()
+        if focus == FOCUS_GROUPS:
+            chooser = RaidGroupsDialog(self, settings['focus_groups'])
+            if not chooser.exec() or not chooser.chosen():
+                # Cancelled, or no group ticked: keep the previous choice.
+                self.show_focus()
+                return
+            settings['focus_groups'] = chooser.chosen()
+        settings['focus'] = focus
+        self.save_and_redraw()
+        self.show_focus()
+
+    def show_focus(self):
+        settings = self.overlay.settings
+        index = self.focus_picker.findData(FOCUS_GROUPS)
+        groups = settings['focus_groups']
+        self.focus_picker.setItemText(index, f'Groups {", ".join(map(str, groups))}' if groups else FOCUS_GROUPS_TEXT)
+        self.focus_picker.setCurrentIndex(self.focus_picker.findData(settings['focus']))
+
     def set_distance_warning(self, enabled):
         self.overlay.settings['distance_warning'] = enabled
         self.spins['range'].setEnabled(enabled)
@@ -1262,6 +1448,10 @@ class ControlWindow(QWidget):
         self.overlay.settings['thresholds'] = default_thresholds()
         self.overlay.settings.update(event_defaults({}))
         self.distance_box.setChecked(True)
+        self.overlay.settings['focus'] = FOCUS_ALL
+        self.overlay.settings['focus_groups'] = []
+        self.overlay.settings['drop_rate'] = DEFAULT_DROP_RATE
+        self.show_focus()
         self.save_and_redraw()
         for dialog in self.dialogs.values():
             dialog.load()
@@ -1291,6 +1481,12 @@ class ControlWindow(QWidget):
     def refresh(self):
         with state_lock:
             names = sorted(members)
+            release = newer_release
+        if release and self.update_notice.isHidden():
+            version, url = release
+            self.update_notice.setText(f'<span style="color:{STATUS_OK}">&#9650;</span> {APP_NAME} {version} is '
+                                       f'available. <a href="{url}">Download it</a>')
+            self.update_notice.show()
         color, message = feed_status()
         self.status.setText(f'<span style="color:{color}">&#9679;</span> {message}')
         self.visibility_button.setText('Hide' if self.overlay.isVisible() else 'Show')
@@ -1308,6 +1504,36 @@ class ControlWindow(QWidget):
 
     def closeEvent(self, event):
         QApplication.quit()
+
+
+class RaidGroupsDialog(QDialog):
+    # Tick the raid groups to watch. Only used while choosing, so it asks and returns rather than saving live.
+    def __init__(self, parent, chosen):
+        super().__init__(parent)
+        self.setWindowTitle(f'{APP_NAME}: raid groups to watch')
+        self.boxes = []
+        grid = QGridLayout()
+        for number in range(1, RAID_GROUPS + 1):
+            box = QCheckBox(f'Group {number}')
+            box.setChecked(number in chosen)
+            grid.addWidget(box, (number - 1) // RAID_GROUP_COLUMNS, (number - 1) % RAID_GROUP_COLUMNS)
+            self.boxes.append(box)
+        ok_button = QPushButton('OK')
+        ok_button.setDefault(True)
+        ok_button.clicked.connect(self.accept)
+        cancel_button = QPushButton('Cancel')
+        cancel_button.clicked.connect(self.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(ok_button)
+        buttons.addWidget(cancel_button)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel('Show players from these raid groups. Pinned players always show.'))
+        layout.addLayout(grid)
+        layout.addLayout(buttons)
+
+    def chosen(self):
+        return [number for number, box in enumerate(self.boxes, start=1) if box.isChecked()]
 
 
 class AlertTypesDialog(QDialog):
@@ -1333,8 +1559,22 @@ class AlertTypesDialog(QDialog):
             divider.setFrameShape(QFrame.VLine)
             divider.setFrameShadow(QFrame.Sunken)
             grid.addWidget(divider, 0, column, len(EVENTS) + 1, 1, Qt.AlignHCenter)
+        self.drop_rate = QSpinBox()
+        self.drop_rate.setRange(*DROP_RATE_RANGE)
+        self.drop_rate.setSuffix('% HP/sec')
+        self.drop_rate.setToolTip('A player losing health faster than this gets \u25bc after their health, '
+                                  'and is listed even above their warning level.')
+        self.drop_rate.valueChanged.connect(self.change_drop_rate)
         for row, (key, (label, _, has_sound)) in enumerate(EVENTS.items(), start=1):
-            grid.addWidget(QLabel(label), row, 0)
+            if key == 'dropping':
+                # Its rate setting sits in its own row rather than apart from the grid.
+                cell = QHBoxLayout()
+                cell.addWidget(QLabel(f'{label}, over'))
+                cell.addWidget(self.drop_rate)
+                cell.addStretch()
+                grid.addLayout(cell, row, 0)
+            else:
+                grid.addWidget(QLabel(label), row, 0)
             grid.addWidget(self.make_box('show', key), row, 2, Qt.AlignCenter)
             if has_sound is not None:
                 grid.addWidget(self.make_box('sound', key), row, 4, Qt.AlignCenter)
@@ -1345,8 +1585,9 @@ class AlertTypesDialog(QDialog):
                 test_button.clicked.connect(lambda _, key=key: self.play(key))
                 grid.addWidget(test_button, row, 6)
         grid.setColumnStretch(0, 1)
-        note = QLabel('The two sides are independent: an alert can show without a sound, or sound without showing. '
-                      'Sounds play when an alert starts, and only the most urgent one when several start together.')
+        note = QLabel('<i>Show on overlay</i> and <i>Play sound</i> are independent: an alert can show without a '
+                      'sound, or sound without showing. Sounds play when an alert starts, and only the most urgent '
+                      'one when several start together.')
         note.setWordWrap(True)
         close_button = QPushButton('Close')
         close_button.clicked.connect(self.close)
@@ -1354,8 +1595,9 @@ class AlertTypesDialog(QDialog):
         buttons.addStretch()
         buttons.addWidget(close_button)
         layout = QVBoxLayout(self)
-        layout.addLayout(grid)
         layout.addWidget(note)
+        layout.addSpacing(NOTE_SPACING)
+        layout.addLayout(grid)
         layout.addLayout(buttons)
         self.load()
 
@@ -1404,6 +1646,9 @@ class AlertTypesDialog(QDialog):
             box.blockSignals(True)
             box.setChecked(checked)
             box.blockSignals(False)
+        self.drop_rate.blockSignals(True)
+        self.drop_rate.setValue(settings['drop_rate'])
+        self.drop_rate.blockSignals(False)
         for key, picker in self.pickers.items():
             picker.blockSignals(True)
             custom = settings['custom_sounds'].get(key)
@@ -1416,6 +1661,10 @@ class AlertTypesDialog(QDialog):
 
     def change(self, group, key, checked):
         self.control.overlay.settings[group][key] = checked
+        self.control.save_and_redraw()
+
+    def change_drop_rate(self, value):
+        self.control.overlay.settings['drop_rate'] = value
         self.control.save_and_redraw()
 
 
@@ -1571,6 +1820,7 @@ def main():
     args = parser.parse_args()
 
     threading.Thread(target=scan_pipes, args=(args,), daemon=True).start()
+    threading.Thread(target=check_for_update, daemon=True).start()
 
     # Without its own app ID, a script run by python.exe is grouped under Python's taskbar icon.
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
