@@ -3,9 +3,33 @@ build/
 dist/
 *.spec
 
+# Python
 __pycache__/
+*.py[cod]
+.venv/
+venv/
 
 # Per-user state written next to the script or exe
 position.json
 pins.json
 settings.json
+
+# Local notes for Claude Code, not published
+CLAUDE.md
+
+# macOS metadata, including the ._ files it writes on network shares
+.DS_Store
+._*
+.AppleDouble
+.Spotlight-V100
+.Trashes
+
+# Windows metadata
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Editors
+.idea/
+.vscode/
+*.swp
