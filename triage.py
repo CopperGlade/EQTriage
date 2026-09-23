@@ -22,7 +22,7 @@ from PySide6.QtGui import (
     QColor, QCursor, QDesktopServices, QFont, QFontMetrics, QIcon, QPainter, QPainterPath, QPen, QPixmap,
 )
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QListWidget, QPushButton, QSpinBox,
+    QApplication, QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QListWidget, QPushButton, QSpinBox,
     QVBoxLayout, QWidget,
 )
 
@@ -93,7 +93,7 @@ PADDING = 6
 PIN_WIDTH = 14
 ROW_GAP = 4
 CORNER_RADIUS = 3
-PANEL_COLOR = QColor(14, 18, 26, 180)
+PANEL_RGB = (14, 18, 26)
 HEADER_COLOR = QColor(255, 255, 255, 20)
 EDGE_COLOR = QColor(255, 255, 255, 50)
 DIVIDER_COLOR = QColor(255, 255, 255, 22)
@@ -115,7 +115,13 @@ SETTINGS = {
     'font_size': (10, 7, 20, 'Text size', ' pt'),
     # Counted in characters rather than pixels, so the overlay widens with the text size and names keep fitting.
     'width': (19, 12, 40, 'Overlay width', ' characters'),
+    # Only the dark background behind the rows; text and alert colors always stay solid. The minimum keeps the
+    # header visible, since fully transparent pixels would let clicks meant for dragging fall through to the game.
+    'opacity': (70, 10, 100, 'Background opacity', '%'),
 }
+# How the EQ Triage window groups them: what the overlay looks like, and what gets listed on it.
+OVERLAY_SETTINGS = ('font_size', 'width', 'opacity')
+ALERT_SETTINGS = ('low_hp', 'critical_hp', 'range')
 
 GWL_EXSTYLE = -20
 WS_EX_TRANSPARENT = 0x00000020
@@ -484,6 +490,7 @@ def load_settings():
         valid = isinstance(value, (int, float)) and not isinstance(value, bool)
         settings[key] = min(max(int(value), minimum), maximum) if valid else default
     settings['critical_hp'] = min(settings['critical_hp'], settings['low_hp'])
+    settings['locked'] = saved.get('locked') is True
     return settings
 
 
@@ -563,7 +570,8 @@ class TriageWindow(QWidget):
             self.rows = rows
             self.update()
         over_pin = self.pin_key_at(cursor) is not None
-        over_header = self.rect().contains(cursor) and cursor.y() < HEADER_HEIGHT
+        # A locked overlay has no drag area, so its header lets clicks through like the rest of it.
+        over_header = not self.settings['locked'] and self.rect().contains(cursor) and cursor.y() < HEADER_HEIGHT
         self.setCursor(Qt.PointingHandCursor if over_pin else Qt.SizeAllCursor)
         self.set_passthrough(self.drag_offset is None and not over_header and not over_pin)
         ctypes.windll.user32.SetWindowPos(
@@ -627,7 +635,7 @@ class TriageWindow(QWidget):
         panel = QPainterPath()
         panel.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), CORNER_RADIUS, CORNER_RADIUS)
 
-        painter.fillPath(panel, PANEL_COLOR)
+        painter.fillPath(panel, QColor(*PANEL_RGB, round(255 * self.settings['opacity'] / 100)))
         painter.save()
         painter.setClipPath(panel)
         painter.fillRect(QRectF(0, 0, width, HEADER_HEIGHT), HEADER_COLOR)
@@ -679,7 +687,7 @@ class TriageWindow(QWidget):
         key = self.pin_key_at(event.position())
         if key:
             self.toggle_pin(key)
-        elif event.position().y() < HEADER_HEIGHT:
+        elif event.position().y() < HEADER_HEIGHT and not self.settings['locked']:
             self.drag_offset = event.globalPosition().toPoint() - self.pos()
             self.take_focus()
 
@@ -749,22 +757,37 @@ class ControlWindow(QWidget):
         self.status.setTextFormat(Qt.RichText)
         self.status.setWordWrap(True)
 
-        settings_box = QGroupBox('Settings')
-        form = QFormLayout(settings_box)
         self.spins = {}
-        for key, (_, minimum, maximum, label, suffix) in SETTINGS.items():
-            spin = QSpinBox()
-            spin.setRange(minimum, maximum)
-            spin.setSuffix(suffix)
-            spin.setValue(overlay.settings[key])
-            spin.valueChanged.connect(lambda value, key=key: self.change_setting(key, value))
-            form.addRow(label, spin)
-            self.spins[key] = spin
+        overlay_box = QGroupBox('Overlay')
+        preview_button = QPushButton('Preview')
+        preview_button.setToolTip(
+            f'Fill the overlay with sample rows for {PREVIEW_SECONDS:g} seconds to check its size and position.'
+        )
+        preview_button.clicked.connect(self.preview)
+        self.visibility_button = QPushButton()
+        self.visibility_button.clicked.connect(self.toggle_overlay)
+        reset_button = QPushButton('Recenter')
+        reset_button.setToolTip('Move the overlay back to the top center of the screen, e.g. if it is off-screen.')
+        reset_button.clicked.connect(overlay.reset_position)
+        lock_box = QCheckBox('Lock position')
+        lock_box.setToolTip("Stop the overlay's header from being dragged, so a stray click can't move it.")
+        lock_box.setChecked(overlay.settings['locked'])
+        lock_box.toggled.connect(self.set_locked)
+        overlay_row = QHBoxLayout()
+        overlay_row.addWidget(preview_button)
+        overlay_row.addWidget(self.visibility_button)
+        overlay_row.addWidget(reset_button)
+        overlay_form = QFormLayout()
+        self.add_spins(overlay_form, OVERLAY_SETTINGS)
+        overlay_layout = QVBoxLayout(overlay_box)
+        overlay_layout.addLayout(overlay_row)
+        overlay_layout.addWidget(lock_box)
+        overlay_layout.addLayout(overlay_form)
+
+        alerts_box = QGroupBox('Alerts')
+        self.add_spins(QFormLayout(alerts_box), ALERT_SETTINGS)
         # Red is a stronger warning than listed, so it can never start above the listing level.
         self.spins['critical_hp'].setMaximum(overlay.settings['low_hp'])
-        defaults_button = QPushButton('Restore defaults')
-        defaults_button.clicked.connect(self.restore_defaults)
-        form.addRow('', defaults_button)
 
         pins_box = QGroupBox('Pinned players (always shown at the top)')
         self.pin_list = QListWidget()
@@ -785,27 +808,15 @@ class ControlWindow(QWidget):
         pins_layout.addWidget(self.pin_list)
         pins_layout.addLayout(pin_row)
 
-        overlay_box = QGroupBox('Overlay')
-        preview_button = QPushButton('Preview')
-        preview_button.setToolTip(
-            f'Fill the overlay with sample rows for {PREVIEW_SECONDS:g} seconds to check its size and position.'
-        )
-        preview_button.clicked.connect(self.preview)
-        self.visibility_button = QPushButton()
-        self.visibility_button.clicked.connect(self.toggle_overlay)
-        reset_button = QPushButton('Recenter')
-        reset_button.setToolTip('Move the overlay back to the top center of the screen, e.g. if it is off-screen.')
-        reset_button.clicked.connect(overlay.reset_position)
-        overlay_row = QHBoxLayout(overlay_box)
-        overlay_row.addWidget(preview_button)
-        overlay_row.addWidget(self.visibility_button)
-        overlay_row.addWidget(reset_button)
-
+        defaults_button = QPushButton('Restore defaults')
+        defaults_button.setToolTip('Reset the Overlay and Alerts settings. Pins, position and lock are kept.')
+        defaults_button.clicked.connect(self.restore_defaults)
         docs_button = QPushButton('Read the docs')
         docs_button.clicked.connect(open_docs)
         quit_button = QPushButton('Quit')
         quit_button.clicked.connect(QApplication.quit)
         buttons = QHBoxLayout()
+        buttons.addWidget(defaults_button)
         buttons.addStretch()
         buttons.addWidget(docs_button)
         buttons.addWidget(quit_button)
@@ -814,7 +825,7 @@ class ControlWindow(QWidget):
         layout.addWidget(intro)
         layout.addWidget(self.status)
         layout.addWidget(overlay_box)
-        layout.addWidget(settings_box)
+        layout.addWidget(alerts_box)
         layout.addWidget(pins_box)
         layout.addLayout(buttons)
         self.timer = QTimer(self)
@@ -831,6 +842,21 @@ class ControlWindow(QWidget):
         if key in ('font_size', 'width'):
             self.overlay.apply_font()
         self.overlay.redraw()
+
+    def add_spins(self, form, keys):
+        for key in keys:
+            _, minimum, maximum, label, suffix = SETTINGS[key]
+            spin = QSpinBox()
+            spin.setRange(minimum, maximum)
+            spin.setSuffix(suffix)
+            spin.setValue(self.overlay.settings[key])
+            spin.valueChanged.connect(lambda value, key=key: self.change_setting(key, value))
+            form.addRow(label, spin)
+            self.spins[key] = spin
+
+    def set_locked(self, locked):
+        self.overlay.settings['locked'] = locked
+        save_json(SETTINGS_FILE, self.overlay.settings)
 
     def restore_defaults(self):
         # low_hp comes first in SETTINGS, so the red level's cap is raised before its default is applied.
