@@ -8,7 +8,7 @@ EQ Triage sits on top of EverQuest and lists the people who need attention: play
 
 1. **Install Zeal.** EQ Triage gets its data from Zeal's named pipe, so the Project Quarm client must be running with Zeal (`Zeal.asi` in your EverQuest folder). The pipe is on by default.
 2. **Turn on detailed data, once.** In game, type `/pipeverbose on`. Without it, Zeal doesn't send player health. Zeal remembers the setting (`PipeVerbose=TRUE` in `zeal.ini`), so you only do this once. If the overlay shows a grey **Type /pipeverbose on** row, this step is missing.
-3. **Install EQ Triage.** Copy the `EQTriage` folder into your EverQuest folder, next to `eqgame.exe`, so you end up with, for example, `C:\QUARM\EQTriage\EQTriage.exe`.
+3. **Install EQ Triage.** Download `EQTriage-vX.Y.Z.zip` from the [latest release](https://github.com/CopperGlade/EQTriage/releases/latest) and extract it into your EverQuest folder, next to `eqgame.exe`, so you end up with, for example, `C:\QUARM\EQTriage\EQTriage.exe`.
 
    Unlike Zeal, EQ Triage is a separate program rather than a plugin, so it works from any folder. Keeping it in its own folder inside EverQuest just keeps everything together. The folder must be one you can write to, because EQ Triage saves its settings there, so avoid `Program Files`.
 4. **Start EQ Triage.** Run `EQTriage.exe`. A desktop shortcut to it is handy. It can start before or after EverQuest, and it connects to every EverQuest window you have open, so multiboxing needs no extra setup.
@@ -133,7 +133,7 @@ Everything lives in the `EQTriage` folder:
 - `pins.json`: your pinned players. Created the first time you pin someone.
 - `settings.json`: your settings. Created the first time you change one.
 
-To update EQ Triage, replace `EQTriage.exe` and keep the `.json` files. To uninstall, delete the folder.
+To update EQ Triage, quit it, download the [latest release](https://github.com/CopperGlade/EQTriage/releases/latest) and extract it over the old folder. Only `EQTriage.exe` is replaced; your `.json` files are kept. To uninstall, delete the folder.
 
 ## Troubleshooting
 
