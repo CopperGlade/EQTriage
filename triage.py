@@ -27,7 +27,7 @@ from PySide6.QtGui import (
     QColor, QCursor, QDesktopServices, QFont, QFontMetrics, QIcon, QPainter, QPainterPath, QPen, QPixmap,
 )
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QGridLayout, QGroupBox,
+    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QGridLayout, QGroupBox,
     QHBoxLayout, QLabel, QListWidget, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
@@ -70,9 +70,9 @@ NOTE_SPACING = 8
 PIN_LIST_HEIGHT = 90
 TEST_BUTTON_WIDTH = 28
 CUSTOM_ITEM_TEXT = 'Custom file\u2026'
-GRID_SPACING = 18
-SHOW_COLUMN_WIDTH = 120
-DIVIDER_COLUMN_WIDTH = 24
+EVENT_INDENT = 16
+EVENT_SPACING = 10
+EVENT_LINE_SPACING = 4
 MAX_BUFFER = 1_000_000
 CHARMER_COLOR = '#ff0000'
 LOW_HP_COLOR = '#ffff00'
@@ -173,13 +173,16 @@ PET_GROUP = 'Pets'
 UNKNOWN_GROUP = 'Unknown class'
 # Default (list, red) levels by how much punishment a class can take: melee last, pure casters first.
 CATEGORIES = {
-    'Melee': (('Bard', 'Monk', 'Paladin', 'Ranger', 'Rogue', 'Shadow Knight', 'Warrior'), (40, 25)),
-    'Hybrid casters': (('Beastlord', 'Cleric', 'Druid', 'Shaman'), (50, 30)),
+    'Melee': (('Bard', 'Beastlord', 'Monk', 'Paladin', 'Ranger', 'Rogue', 'Shadow Knight', 'Warrior'), (40, 25)),
+    'Hybrid casters': (('Cleric', 'Druid', 'Shaman'), (60, 40)),
     'Pure casters': (('Enchanter', 'Magician', 'Necromancer', 'Wizard'), (75, 50)),
     'Other': ((PET_GROUP, UNKNOWN_GROUP), (50, 30)),
 }
 THRESHOLD_GROUPS = [group for groups, _ in CATEGORIES.values() for group in groups]
-DEFAULT_LEVELS = {group: levels for groups, levels in CATEGORIES.values() for group in groups}
+# Pets are listed under Other but tank like melee, so they default to melee's levels.
+DEFAULT_LEVELS = {group: levels for groups, levels in CATEGORIES.values() for group in groups} | {
+    PET_GROUP: CATEGORIES['Melee'][1],
+}
 # Version 1.0 had a single warning/critical level, saved as these values unless the player changed them.
 LEGACY_LEVELS = (50, 30)
 # Event key -> (label in the EQ Triage window, shown by default, sound on by default; None when it has no sound).
@@ -190,7 +193,7 @@ EVENTS = {
     'charmer_hit': ('Charmer hit', True, True),
     'dropping': ('Dropping fast (\u25bc)', True, False),
     'death': ('Death', True, False),
-    'pets': ('Pets in the list', True, None),
+    'pets': ('Pets', True, None),
 }
 # The sound each alert plays until the player picks another from SOUNDS.
 # Picker value meaning "play the player's own .wav from settings['custom_sounds']".
@@ -1545,46 +1548,35 @@ class AlertTypesDialog(QDialog):
         self.setWindowTitle(f'{APP_NAME}: alert types & sounds')
         self.boxes = {'show': {}, 'sound': {}}
         self.pickers = {}
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(GRID_SPACING)
-        # Columns: alert name | divider | Show on overlay | divider | Play sound checkbox, sound picker, play button.
-        grid.setColumnMinimumWidth(1, DIVIDER_COLUMN_WIDTH)
-        grid.setColumnMinimumWidth(2, SHOW_COLUMN_WIDTH)
-        grid.setColumnMinimumWidth(3, DIVIDER_COLUMN_WIDTH)
-        grid.addWidget(QLabel('<b>Show on overlay</b>'), 0, 2, Qt.AlignCenter)
-        grid.addWidget(QLabel('<b>Play sound</b>'), 0, 4, 1, 3, Qt.AlignLeft | Qt.AlignVCenter)
-        # Vertical lines set the alert names apart from the settings, and split the two independent questions.
-        for column in (1, 3):
-            divider = QFrame()
-            divider.setFrameShape(QFrame.VLine)
-            divider.setFrameShadow(QFrame.Sunken)
-            grid.addWidget(divider, 0, column, len(EVENTS) + 1, 1, Qt.AlignHCenter)
+        # One section per alert: its name, then a line to show it on the overlay, then a line to play a sound.
+        events = QVBoxLayout()
+        events.setSpacing(EVENT_LINE_SPACING)
         self.drop_rate = QSpinBox()
         self.drop_rate.setRange(*DROP_RATE_RANGE)
-        self.drop_rate.setSuffix('% HP/sec')
+        self.drop_rate.setSuffix('% HP per second')
         self.drop_rate.setToolTip('A player losing health faster than this gets \u25bc after their health, '
                                   'and is listed even above their warning level.')
         self.drop_rate.valueChanged.connect(self.change_drop_rate)
-        for row, (key, (label, _, has_sound)) in enumerate(EVENTS.items(), start=1):
-            if key == 'dropping':
-                # Its rate setting sits in its own row rather than apart from the grid.
-                cell = QHBoxLayout()
-                cell.addWidget(QLabel(f'{label}, over'))
-                cell.addWidget(self.drop_rate)
-                cell.addStretch()
-                grid.addLayout(cell, row, 0)
-            else:
-                grid.addWidget(QLabel(label), row, 0)
-            grid.addWidget(self.make_box('show', key), row, 2, Qt.AlignCenter)
+        for index, (key, (label, _, has_sound)) in enumerate(EVENTS.items()):
+            if index:
+                events.addSpacing(EVENT_SPACING)
+            events.addWidget(QLabel(f'<b>{label}</b>'))
+            lines = [[self.make_box('show', key, 'Show on overlay')]]
             if has_sound is not None:
-                grid.addWidget(self.make_box('sound', key), row, 4, Qt.AlignCenter)
-                grid.addWidget(self.make_picker(key), row, 5)
                 test_button = QPushButton('\u25b6')
                 test_button.setFixedWidth(TEST_BUTTON_WIDTH)
                 test_button.setToolTip('Play this sound')
                 test_button.clicked.connect(lambda _, key=key: self.play(key))
-                grid.addWidget(test_button, row, 6)
-        grid.setColumnStretch(0, 1)
+                lines.append([self.make_box('sound', key, 'Play sound on event'), self.make_picker(key), test_button])
+            if key == 'dropping':
+                lines.append([QLabel('Fast means losing more than'), self.drop_rate])
+            for widgets in lines:
+                line = QHBoxLayout()
+                line.addSpacing(EVENT_INDENT)
+                for widget in widgets:
+                    line.addWidget(widget)
+                line.addStretch()
+                events.addLayout(line)
         note = QLabel('<i>Show on overlay</i> and <i>Play sound</i> are independent: an alert can show without a '
                       'sound, or sound without showing. Sounds play when an alert starts, and only the most urgent '
                       'one when several start together.')
@@ -1597,7 +1589,8 @@ class AlertTypesDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(note)
         layout.addSpacing(NOTE_SPACING)
-        layout.addLayout(grid)
+        layout.addLayout(events)
+        layout.addSpacing(NOTE_SPACING)
         layout.addLayout(buttons)
         self.load()
 
@@ -1633,8 +1626,8 @@ class AlertTypesDialog(QDialog):
     def play(self, key):
         self.control.overlay.sounds.play(self.control.overlay.settings, key)
 
-    def make_box(self, group, key):
-        box = QCheckBox()
+    def make_box(self, group, key, text):
+        box = QCheckBox(text)
         box.toggled.connect(lambda checked: self.change(group, key, checked))
         self.boxes[group][key] = box
         return box
