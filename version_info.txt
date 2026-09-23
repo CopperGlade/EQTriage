@@ -1,0 +1,18 @@
+VSVersionInfo(
+  ffi=FixedFileInfo(filevers=(1, 0, 0, 0), prodvers=(1, 0, 0, 0)),
+  kids=[
+    StringFileInfo([
+      StringTable('040904B0', [
+        StringStruct('CompanyName', 'SEBIK (EUROPA)'),
+        StringStruct('FileDescription', 'EQ Triage - Project Quarm HP and charm break alerts'),
+        StringStruct('FileVersion', '1.0.0'),
+        StringStruct('InternalName', 'EQTriage'),
+        StringStruct('LegalCopyright', 'Author: SEBIK (EUROPA)'),
+        StringStruct('OriginalFilename', 'EQTriage.exe'),
+        StringStruct('ProductName', 'EQ Triage'),
+        StringStruct('ProductVersion', '1.0.0'),
+      ])
+    ]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)
