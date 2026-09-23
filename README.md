@@ -2,7 +2,7 @@
 
 A healer's overlay for Project Quarm · v1.0.0 · by Sebik &lt;Europa&gt;
 
-EQ Triage sits on top of EverQuest and lists the people who need attention: players and pets at low health, charm breaks, charmers under attack, deaths, and anyone out of healing range. It only reads game data and draws on screen. It never presses keys or clicks for you.
+EQ Triage sits on top of EverQuest and lists the people who need attention: players and pets at low health, charm breaks, charmers being hit, deaths, and anyone too far away to heal. It only reads game data and draws on screen. It never presses keys or clicks for you.
 
 ## Setup
 
@@ -19,22 +19,23 @@ EQ Triage sits on top of EverQuest and lists the people who need attention: play
 
 ## Reading the overlay
 
-The overlay has 10 rows. Rows appear in this order:
+The overlay has 10 rows by default (adjustable from 3 to 25 in the Overlay settings). Rows appear in this order:
 
 1. **Pinned players**, in the order you pinned them.
-2. **Charmer alerts** (`!!`, then `PET BREAK`).
+2. **Charmer alerts** (`CHARMER HIT`, then `CHARM BREAK`).
 3. **Deaths.**
-4. **Everyone else below 50% health** (adjustable under Alerts), players and pets together, lowest first.
+4. **Everyone else below their warning level** (set per class; 40–75% by default), players and pets together, most urgent first.
 
 | Row | Color | Meaning |
 |---|---|---|
-| `Sebik 45%` | Yellow | A player below 50% health. |
-| `Sebik 20%` | Red | A player below 30% health. |
-| `Sebik pet 40%` | Yellow | Sebik's pet below 50% (red below 30%). |
-| `PET BREAK Sebik` | Red | Sebik's charmed pet just broke free. Shown for 6 seconds. |
-| `!! Sebik 80%` | Red | Sebik is taking damage after a charm break, probably from the freed pet. This is the most urgent row. |
+| `Sebik 45%` | Yellow | A player below their class's warning level (40% melee, 50% hybrid casters, 75% pure casters by default). |
+| `Sebik 20%` | Red | A player below their class's critical level (25% melee, 30% hybrid casters, 50% pure casters by default). |
+| `Sebik pet 40%` | Yellow | Sebik's pet below the pets' warning level, 50% by default (red below the 30% critical level). |
+| `CHARM BREAK Sebik` | Red | Sebik's charmed pet just broke free. Shown for 6 seconds. |
+| `CHARMER HIT Sebik 80%` | Red | Sebik is taking damage after a charm break, probably from the freed pet. This is the most urgent row. |
 | `DEAD Sebik` | Purple | Sebik died. Shown for 10 seconds. |
-| `Sebik 38% (OOR)` | Yellow | Out of Complete Heal range: more than 100 units away from you, or in another zone. |
+| `Sebik 38% (150 away)` | Yellow | A distance warning: 150 units from you, farther than the distance warning setting (70 units by default). |
+| `Sebik 38% (other zone)` | Yellow | A distance warning for someone in a different zone. |
 | `Sebik 95%` | White | A pinned player at healthy HP. |
 | `Sebik --` | Grey | A pinned player with no data right now (zoned, or not in your group or raid). |
 
@@ -42,19 +43,24 @@ Long names are shortened with … so the health and tags always stay visible.
 
 ## Features
 
-### Low health
+### Warning and critical health
 
-Group and raid members below 50% show in yellow, and in red below 30%. Both levels can be changed under Alerts. Your own pets and your group members' pets are included, sorted in with the players by health. Raid members' pets aren't, because Zeal doesn't send them.
+Group and raid members show in yellow once they drop below their class's warning level and in red below its critical level: 40% / 25% for melee, 50% / 30% for hybrid casters and 75% / 50% for pure casters by default, since they die very fast. Both levels can be changed per class under **Health thresholds…**. Your own pets and your group members' pets are included, sorted in with the players by health. Raid members' pets aren't, because Zeal doesn't send them.
 
 ### Charm breaks
 
-When a group member's pet health bar disappears while the pet still had more than 10% health, EQ Triage reports `PET BREAK name`. A bar that vanishes at low health counts as the pet dying and is ignored. This works for your group only, not the whole raid.
+When a group member's pet health bar disappears while the pet still had more than 10% health, EQ Triage reports `CHARM BREAK name`. A bar that vanishes at low health counts as the pet dying and is ignored. This works for your group only, not the whole raid.
 
-A pet that is dismissed at high health, or whose charmer dies, looks the same as a charm break. When a charmer dies, the pet really does turn on you.
+To avoid false alarms, a lost pet only counts as a charm break when:
 
-### Charmer under attack
+- the owner is an **Enchanter, Necromancer or Bard**, the classes that charm at high level. A magician dismissing a pet, for example, is ignored.
+- the pet isn't a **summoned pet**. Project Quarm names summoned pets either after their owner (*Sebik`s pet*, *familiar* or *warder*) or with a name from a fixed generator pattern (*Gabartik*, *Jobaner*, *Xebekn* and so on). EQ Triage recognizes every name that generator can produce, so a charmed mob is still spotted even when it has a one-word name (*Quillmane*), as well as the usual *a Shissar Defiler* or *Fippy Darkpaw*. This keeps a necromancer's or enchanter's own summoned pet from counting.
 
-For 30 seconds after a charm break, any drop in the charmer's health turns their row into `!! name 80%` at the top of the overlay. It stays for 6 seconds after the last hit and keeps watching as long as the hits continue. If the charmer gets a pet back (re-charms), the alert clears.
+If the owner's class or the pet's name isn't known yet, EQ Triage reports the break anyway rather than risk missing one. A charmed pet that is dismissed at high health, or whose charmer dies, still looks like a charm break. When a charmer dies, the pet really does turn on you.
+
+### Charmer hit
+
+For 30 seconds after a charm break, any drop in the charmer's health turns their row into `CHARMER HIT name 80%` at the top of the overlay. Every break turns the pet hostile, so this row is about what matters next: the charmer is actually taking damage. It stays for 6 seconds after the last hit and keeps watching as long as the hits continue. If the charmer gets a pet back (re-charms), the alert clears.
 
 Any health drop counts, including ones the charmer causes, such as a necromancer's Lich spells.
 
@@ -62,9 +68,11 @@ Any health drop counts, including ones the charmer causes, such as a necromancer
 
 When the game reports a group or raid member slain (or *You have been slain* / *You died* on one of your own characters), a purple `DEAD name` row shows for 10 seconds. It replaces that player's other rows. Deaths only register if one of your EverQuest windows saw the message.
 
-### Out of range
+### Distance warnings
 
-By default, players outside **Complete Heal range** (100 units, adjustable under Alerts) of your character, or in a different zone, get an `(OOR)` tag, so you know before you start a 10-second CH that it won't land. Range is measured from whichever EverQuest window is active, so it follows you when you switch characters. Divine Light and Ethereal Light share the same 100 range; the Remedy line reaches farther:
+Listed players farther from your character than the **Distance warning beyond** setting (70 units by default) show how far away they are, e.g. `Sebik 38% (150 away)`, or `(other zone)`. That tells you before you start a long heal whether it can land, and whether they need to take a step closer or are across the zone. The distance is rounded to the nearest 10 so it doesn't flicker as people move.
+
+Distance is measured from whichever EverQuest window is active, so it follows you when you switch characters. The 70-unit default warns a little before the edge of the main cleric heals:
 
 | Spell | Range |
 |---|---|
@@ -72,11 +80,11 @@ By default, players outside **Complete Heal range** (100 units, adjustable under
 | Remedy, Ethereal Remedy | 200 |
 | Word of Redemption (group) | 70 around you |
 
-Pets, `DEAD` rows and `PET BREAK` rows never get the tag.
+Pets, `DEAD` rows and `CHARM BREAK` rows never show a distance. To turn distance warnings off, untick **Distance warning beyond** in the Alerts section.
 
 ### Pinning
 
-Pinned players (for example, your main tank) stay at the top of the overlay and are always shown, even at full health. You can pin up to 10 players, and pins are remembered between sessions. There are two ways to pin:
+Pinned players (for example, your main tank) stay at the top of the overlay and are always shown, even at full health. You can pin up to 25 players, and pins are remembered between sessions. If you pin more players than the overlay has rows, only the first ones fit. There are two ways to pin:
 
 - **From the EQ Triage window:** type a name under *Pinned players* (the box suggests everyone in your group and raid) and click **Add**. Select a name and click **Remove** to unpin it. This works for anyone, even at full health.
 - **From the overlay:** every player row has a small pin at its right edge. Click it to pin that player, and click the bright pin again to unpin. This only works for players currently on the overlay.
@@ -111,18 +119,50 @@ The EQ Triage window groups its settings by what they control. Changes apply to 
 | Setting | Default | What it does |
 |---|---|---|
 | Text size | 10 pt | Text size of the rows. The overlay resizes to match. |
-| Overlay width | 19 characters | How wide the overlay is, counted in characters of text so it grows with the text size. Widen it if long names get shortened with …. |
-| Background opacity | 70% | How solid the dark background behind the rows is, from 10% (almost clear) to 100% (solid). The text and alert colors always stay fully visible. |
+| Overlay width | 26 characters | How wide the overlay is, counted in characters of text so it grows with the text size. Widen it if long names get shortened with …. |
+| Background opacity | 70% | How visible the overlay's frame is, from 0% (fully clear) to 100% (solid): the dark background, the outer border and the lines between rows. The text, alert colors, pins, the *Triage* header and the bottom edge always stay fully visible, so at 0% you see just the rows between the header and a thin bottom line. |
+| Number of rows | 10 | How many rows the overlay has, from 3 to 25. The overlay grows or shrinks to match. |
 
-**Alerts**: who gets listed and how.
+**Alerts**: what gets listed, what makes a sound, and at what health. The Alerts section has two buttons that open their own windows, plus the distance warning.
+
+**Alert types & sounds…** asks two separate questions for each alert type. **Show on overlay** controls whether its rows appear on the overlay. **Play sound** controls whether it makes a sound, and which one. The two are independent: an alert can show silently, or sound without cluttering the overlay (for example, hear deaths without a `DEAD` row). Each alert with a sound also has a **sound picker**: choose from 13 built-in sounds (soft ping, water drop, double chirp, two-note chime, rising chime, bell, marimba rising and falling, horn chord, alarm pulses, siren sweep, klaxon and low gong). Picking a sound plays it, and ▶ plays the current choice again.
+
+To use your own sound, pick **Custom file…** at the bottom of the list and choose a `.wav` file; the picker then shows its name, e.g. *Custom: tell.wav*. Only WAV files are supported, since that's what Windows' built-in sound player plays. If the file is later moved or deleted, that alert plays its default built-in sound instead. Restore defaults clears custom files.
+
+| Alert | Shown by default | Sound on by default | Default sound |
+|---|---|---|---|
+| Warning health (yellow) | Yes | No | Soft ping |
+| Critical health (red) | Yes | No | Double chirp |
+| Charm break | Yes | **Yes** | Rising chime |
+| Charmer hit | Yes | **Yes** | Klaxon |
+| Death | Yes | No | Low gong |
+| Pets in the list | Yes | — | — |
+
+Sounds play when an alert starts, not continuously. When several start at once, only the most urgent is heard (charmer hit, then charm break, death, critical, warning). The same alert for the same player won't sound again within 10 seconds, and being healed from red back into yellow is silent. Starting EQ Triage mid-fight doesn't sound for alerts that were already happening. Volume follows your Windows volume. The sounds are generated by EQ Triage itself, so there are no audio files to install.
+
+**Health thresholds…** sets two levels for every class, plus pets and "Unknown class":
+
+- **Warning below:** players below this health are listed, in yellow.
+- **Critical below:** players below this health turn red. It can't be set higher than *Warning below*.
+
+The defaults depend on how much punishment a class can take, so sturdy classes are flagged later and soft ones earlier:
+
+| Category | Classes | Warning below | Critical below |
+|---|---|---|---|
+| Melee | Bard, Monk, Paladin, Ranger, Rogue, Shadow Knight, Warrior | 40% | 25% |
+| Hybrid casters | Beastlord, Cleric, Druid, Shaman | 50% | 30% |
+| Pure casters | Enchanter, Magician, Necromancer, Wizard | 75% | 50% |
+| Other | Pets, Unknown class | 50% | 30% |
+
+The window lists the classes under these headings. Each heading, and the **All classes** row at the top, sets every class beneath it at once; it shows — while those classes have different levels. **Reset to class defaults** puts the table above back. Pets have their own row because Zeal doesn't report a class for them, and *Unknown class* covers the moment before a player's class arrives.
+
+The list is sorted by how close each person is to their own critical level, so a caster just above 50% comes before a warrior at 30%, who still has a comfortable margin above their 25%.
 
 | Setting | Default | What it does |
 |---|---|---|
-| List players below | 50% HP | Players and pets below this health are listed. |
-| Show in red below | 30% HP | Listed players and pets below this health turn red instead of yellow. It can't be set higher than *List players below*. |
-| Out of range beyond | 100 units | Players farther away than this are tagged (OOR). The default is Complete Heal range. |
+| Distance warning beyond | On, 70 units | Listed players farther away than this show their distance, e.g. `(150 away)`. Untick it to turn distance warnings off. |
 
-Click **Preview** while you adjust the Overlay settings to see the effect. **Restore defaults**, at the bottom of the window, puts every setting in both groups back to the values above; it doesn't touch your pinned players, the overlay's position or the lock.
+Click **Preview** while you adjust the Overlay settings to see the effect. **Restore defaults**, at the bottom of the window, puts every setting back to its default, including the alert types, sounds and class thresholds; it doesn't touch your pinned players, the overlay's position or the lock.
 
 ## Files
 
@@ -149,6 +189,6 @@ Start with the status line at the top of the EQ Triage window. It checks the con
 | 🟢 Receiving data from Sebik. Join a group or raid to see other players. | Working. Only you and your pets can show until you group or raid. |
 | 🟢 Receiving data from Sebik. | Everything is working. Every connected character is listed by name; if one of your boxes is missing, its EverQuest window isn't connected yet. |
 
-- **Overlay is empty while the status is green:** that's normal when nobody is hurt. Click **Preview** to check it's on screen, or set *List players below* to 100% for a moment to see real data flowing.
+- **Overlay is empty while the status is green:** that's normal when nobody is hurt. Click **Preview** to check it's on screen, or set **All classes** to warning below 100% under **Health thresholds…** for a moment to see real data flowing.
 - **Can't see the overlay at all:** check it isn't hidden (the button under *Overlay* says **Show**), then click **Recenter**.
 - **Can't drag the overlay:** untick **Lock position** under *Overlay*.
