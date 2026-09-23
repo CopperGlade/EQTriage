@@ -1,6 +1,6 @@
 # EQ Triage
 
-A healer's overlay for Project Quarm · v1.0.0 · by SEBIK (EUROPA)
+A healer's overlay for Project Quarm · v1.0.0 · by Sebik &lt;Europa&gt;
 
 EQ Triage sits on top of EverQuest and lists the people who need attention: players and pets at low health, charm breaks, charmers under attack, deaths, and anyone out of healing range. It only reads game data and draws on screen. It never presses keys or clicks for you.
 

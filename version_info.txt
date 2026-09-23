@@ -3,11 +3,11 @@ VSVersionInfo(
   kids=[
     StringFileInfo([
       StringTable('040904B0', [
-        StringStruct('CompanyName', 'SEBIK (EUROPA)'),
+        StringStruct('CompanyName', 'Sebik <Europa>'),
         StringStruct('FileDescription', 'EQ Triage - Project Quarm HP and charm break alerts'),
         StringStruct('FileVersion', '1.0.0'),
         StringStruct('InternalName', 'EQTriage'),
-        StringStruct('LegalCopyright', 'Author: SEBIK (EUROPA)'),
+        StringStruct('LegalCopyright', 'Author: Sebik <Europa>'),
         StringStruct('OriginalFilename', 'EQTriage.exe'),
         StringStruct('ProductName', 'EQ Triage'),
         StringStruct('ProductVersion', '1.0.0'),

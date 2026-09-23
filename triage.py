@@ -1,6 +1,6 @@
 """EQ Triage: on-screen HP and charm break alerts for Project Quarm, fed by Zeal's named pipe.
 
-Author: SEBIK (EUROPA)
+Author: Sebik <Europa>
 """
 
 import argparse
