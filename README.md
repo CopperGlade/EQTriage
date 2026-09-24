@@ -101,7 +101,7 @@ Pets, `DEAD` rows and `CHARM BREAK` rows never show a distance. To turn distance
 
 ### Target distance window
 
-EQ Triage has two overlays: the **Triage overlay**, the list described above, and the **Distance overlay**, a tiny one-row window with the *Distance* header. Tick **Show window** under *Distance overlay* to turn it on. It shows one thing: the exact distance to your target, e.g. `45 away`, whenever the target is a member of your group or raid, or `Out of zone` in red when that member has no position in your zone. It's small on purpose, meant to sit right beside EverQuest's own target window, which already shows the name. The color tells you which heals can reach them:
+EQ Triage has two overlays: the **Triage overlay**, the list described above, and the **Distance overlay**, a tiny one-row window with the *Distance* header. Tick **Show window** under *Distance overlay* to turn it on. It shows one thing: the exact distance to your target, just the number (e.g. `45`), whenever the target is a member of your group or raid. It's small on purpose, meant to sit right beside EverQuest's own target window, which already shows the name. The color tells you which heals can reach them:
 
 | Distance | Color | By default |
 |---|---|---|
@@ -157,7 +157,7 @@ The sections run top to bottom: *Triage overlay*, *Alerts* and *Pinned players*,
 |---|---|---|
 | Text size | 10 pt | Text size of the rows. The overlay resizes to match. |
 | Overlay width | 26 characters | How wide the overlay is, counted in characters of text so it grows with the text size. Widen it if long names get shortened with …. |
-| Background opacity | 70% | How visible the overlay's frame is, from 0% (fully clear) to 100% (solid): the dark background, the outer border and the lines between rows. The text, alert colors, pins, the *Triage* header and the bottom edge always stay fully visible, so at 0% you see just the rows between the header and a thin bottom line. Tick **Show header bar** to drop the header and bottom edge too. |
+| Background opacity | 70% | How visible the overlay's frame is, from 0% (fully clear) to 100% (solid): the dark background, the outer border and the lines between rows. The text, alert colors, pins, the *Triage* header and the bottom edge always stay fully visible, so at 0% you see just the rows between the header and a thin bottom line. Untick **Show header bar** to drop the header and bottom edge too. |
 | Number of rows | 10 | How many rows the overlay has, from 3 to 25. The overlay grows or shrinks to match. |
 
 **Distance overlay**: the second overlay, see [Target distance window](#target-distance-window). Show window, Re-center, Lock position, Show header bar and its own Preview sit in the section itself; the last four settings are behind **Other settings**.
@@ -166,7 +166,7 @@ The sections run top to bottom: *Triage overlay*, *Alerts* and *Pinned players*,
 |---|---|---|
 | Show window | On | Shows the Distance overlay. The same checkbox under *Triage overlay* (also on by default) does the same for the list, so either overlay can run alone. |
 | Lock position | Off | Stops the Distance overlay's header from being dragged, independently of the Triage overlay's lock. |
-| Show header bar | On | Untick it to show just the distance, without the *Distance* header or the bottom edge. As with the Triage overlay, Preview brings the header back for a moment so you can drag it. |
+| Show header bar | On | Untick it to show just the distance, without the *Distance* header or the bottom edge. The overlay keeps its size, just the width of the word *Distance*. As with the Triage overlay, Preview brings the header back for a moment so you can drag it. |
 | Text size | 10 pt | Text size of the number, independent of the Triage overlay's. |
 | Background opacity | 70% | How visible its frame is, independent of the Triage overlay's. |
 | Display yellow farther than | 100 units | The distance shows in white up to here and in yellow beyond. |

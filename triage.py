@@ -124,14 +124,14 @@ DEFAULT_Y = 150
 # to EverQuest's own target window, which already shows the name. The distance is only known for group and raid
 # members, the only other players whose position the pipe carries.
 TARGET_TITLE = 'Distance'
-# Its own width in characters: "1234 away" or "Out of zone" needs far less room than the main overlay's rows, but
-# some air around it reads better than a box hugging the text (never narrower than the title either, see apply_font).
-TARGET_WIDTH = 13
+# Its own width in characters. The row is just the number, header or not, so the overlay is only as wide as its
+# title at the default text size (never narrower, see apply_font); six digits keep "1234" whole at large text sizes,
+# where the title stays small. No zone is big enough for five digits.
+TARGET_WIDTH = 6
 TARGET_POSITION_KEY = 'target'
 TARGET_DEFAULT_Y = 90
-TARGET_SAMPLE_ROW = ('', '45 away', '', PINNED_COLOR, None)
+TARGET_SAMPLE_ROW = ('', '45', '', PINNED_COLOR, None)
 NO_DISTANCE_ROW = ('', '--', '', STALE_COLOR, None)
-OUT_OF_ZONE_ROW = ('', 'Out of zone', '', CRITICAL_HP_COLOR, None)
 FONT_FAMILY = 'Segoe UI'
 TITLE_POINT_SIZE = 8
 HEADER_HEIGHT = 20
@@ -662,11 +662,11 @@ def with_distance(row, distance):
 
 
 def target_row(settings, origin, now):
-    # The Distance overlay's one row for the active client's selected target: "450 away" when the target is a group
-    # or raid member, colored by the target_near/target_far cutoffs (white, yellow, red), or "Out of zone" in red
-    # when that member has no position in your zone. Anything else (a mob, a pet, a player outside the group and
-    # raid) has no position in the feed, so it shows "--", as does a member while your own position is unknown.
-    # No target means an empty row. Needs state_lock.
+    # The Distance overlay's one row for the active client's selected target: the bare distance ("450", the header
+    # says what it is) when the target is a group or raid member, colored by the target_near/target_far cutoffs
+    # (white, yellow, red). Anything else (a mob, a pet, a player outside the group and raid) has no position in the
+    # feed, so it shows "--", as does a member while your own position is unknown. A member in another zone can't be
+    # targeted, so a missing position counts as no distance too. No target means an empty row. Needs state_lock.
     spawn = targets.get(origin)
     if not spawn or now - spawn[1] >= STALE_SECONDS or spawn[0] is None:
         return EMPTY_ROW
@@ -674,17 +674,15 @@ def target_row(settings, origin, now):
     member = next((name for (pipe, name), (spawn_id, seen) in member_spawns.items()
                    if pipe == origin and spawn_id == target_id and now - seen < STALE_SECONDS), None)
     distance = distance_to(member, origin, now) if member else None
-    if distance is None:
+    if distance is None or distance == math.inf:
         return NO_DISTANCE_ROW
-    if distance == math.inf:
-        return OUT_OF_ZONE_ROW
     if distance <= settings['target_near']:
         color = PINNED_COLOR
     elif distance <= settings['target_far']:
         color = LOW_HP_COLOR
     else:
         color = CRITICAL_HP_COLOR
-    return ('', f'{int(distance)} away', '', color, None)
+    return ('', str(int(distance)), '', color, None)
 
 
 def snapshot(settings, now):
@@ -1285,6 +1283,13 @@ class TriageWindow(QWidget):
         self.show()
         self.redraw()
 
+    def title_text(self):
+        # "(preview)" is left off where it doesn't fit, as over the Distance overlay's bare number.
+        title = f'{self.TITLE} (preview)'
+        if self.previewing() and QFontMetrics(self.title_font).horizontalAdvance(title) <= self.width() - 2 * PADDING:
+            return title
+        return self.TITLE
+
     def active_pipe(self):
         # Range is measured from the EQ client in the foreground; while another window (or Triage itself,
         # during a drag) is in front, the last active client is kept.
@@ -1342,8 +1347,7 @@ class TriageWindow(QWidget):
             header = QRectF(PADDING, 0, width - 2 * PADDING, HEADER_HEIGHT)
             painter.setPen(HEADER_TEXT_COLOR)
             painter.setFont(self.title_font)
-            painter.drawText(header, Qt.AlignVCenter | Qt.AlignLeft,
-                             f'{self.TITLE} (preview)' if self.previewing() else self.TITLE)
+            painter.drawText(header, Qt.AlignVCenter | Qt.AlignLeft, self.title_text())
 
         painter.setFont(self.row_font)
         for i, (prefix, name, suffix, color, key) in enumerate(self.rows):
@@ -1395,7 +1399,7 @@ class TriageWindow(QWidget):
 
 
 class TargetWindow(TriageWindow):
-    # The second overlay: one row with the selected target's name and, for a group or raid member, the distance.
+    # The second overlay: one row with the distance to the selected target when it's a group or raid member.
     # No pins, no sounds, its own saved position, and it shows only while settings['target_window'] is on.
     TITLE = TARGET_TITLE
     POSITION_KEY = TARGET_POSITION_KEY

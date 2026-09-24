@@ -282,9 +282,9 @@ def test_target_in_group_shows_its_distance(settings):
     target(42)
     with triage.state_lock:
         row = triage.target_row(settings, PIPE, triage.time.monotonic())
-    assert row[:4] == ('', '50 away', '', triage.PINNED_COLOR)
-    for x, y, text, color in ((60, 80, '100 away', triage.PINNED_COLOR), (90, 120, '150 away', triage.LOW_HP_COLOR),
-                              (300, 400, '500 away', triage.CRITICAL_HP_COLOR)):
+    assert row[:4] == ('', '50', '', triage.PINNED_COLOR)
+    for x, y, text, color in ((60, 80, '100', triage.PINNED_COLOR), (90, 120, '150', triage.LOW_HP_COLOR),
+                              (300, 400, '500', triage.CRITICAL_HP_COLOR)):
         triage.handle_members([{'name': 'Mera', 'spawn_id': 42, 'loc': {'x': x, 'y': y, 'z': 0}}], PIPE)
         with triage.state_lock:
             row = triage.target_row(settings, PIPE, triage.time.monotonic())
@@ -332,13 +332,14 @@ def test_distance_cutoffs_load_in_order(tmp_path):
     assert (settings['target_near'], settings['target_far']) == (100, 200)
 
 
-def test_target_member_without_a_position_is_out_of_zone(clock, settings):
+def test_target_member_without_a_position_has_no_distance(clock, settings):
+    # Someone in another zone can't be targeted, so a member without a position just has no distance.
     triage.handle_members([{'name': 'Mera', 'spawn_id': 42, 'loc': {'x': 30, 'y': 40, 'z': 0}}], PIPE)
     clock.advance(triage.STALE_SECONDS)
     triage.handle_members([{'name': 'Mera', 'spawn_id': 42}], PIPE)
     target(42)
     with triage.state_lock:
-        assert triage.target_row(settings, PIPE, clock.now) == triage.OUT_OF_ZONE_ROW
+        assert triage.target_row(settings, PIPE, clock.now) == triage.NO_DISTANCE_ROW
 
 
 def test_target_outside_the_group_shows_dashes(settings):
@@ -385,6 +386,33 @@ def test_target_window_is_one_row_without_pins(qapp, settings):
     window.preview_until = 0
     assert window.current_rows() == [triage.EMPTY_ROW]
     assert settings['target_window'] is True
+
+
+def test_distance_overlay_is_the_same_with_or_without_its_header(qapp, settings):
+    from PySide6.QtGui import QFontMetrics
+    window = triage.TargetWindow(settings)
+    window.active_pipe = lambda: PIPE
+    triage.handle_members([{'name': 'Mera', 'spawn_id': 42, 'loc': {'x': 30, 'y': 40, 'z': 0}}], PIPE)
+    target(42)
+    title_width = QFontMetrics(window.title_font).horizontalAdvance('Distance')
+    assert window.text_width == max(title_width, window.metrics.horizontalAdvance('0') * triage.TARGET_WIDTH)
+    shown = (window.width(), window.current_rows())
+    assert shown[1][0][:2] == ('', '50')
+    settings['target_show_header'] = False
+    window.apply_font()
+    assert (window.width(), window.current_rows()) == shown, 'just the number, at the same width'
+    target(99)
+    assert window.current_rows() == [triage.NO_DISTANCE_ROW]
+    window.start_preview()
+    assert window.current_rows() == [triage.TARGET_SAMPLE_ROW] and triage.TARGET_SAMPLE_ROW[1] == '45'
+    assert window.title_text() == 'Distance', '(preview) is left off where it does not fit'
+    triage_window = triage.TriageWindow(settings)
+    triage_window.start_preview()
+    assert triage_window.title_text() == 'Triage (preview)'
+    assert window.fit('', '1234', '') == '1234', 'the width fits the longest distance in any zone'
+    settings['target_font_size'] = 20
+    window.apply_font()
+    assert window.fit('', '1234', '') == '1234', 'large text keeps the number whole even though the title stays small'
 
 
 # Charm breaks
