@@ -34,7 +34,7 @@ The overlay has 10 rows by default (adjustable from 3 to 25 in the Overlay setti
 | `CHARM BREAK Sebik` | Red | Sebik's charmed pet just broke free. Shown for 6 seconds. |
 | `CHARMER HIT Sebik 80%` | Red | Sebik is taking damage after a charm break, probably from the freed pet. This is the most urgent row. |
 | `DEAD Sebik` | Purple | Sebik died. Shown for 10 seconds. |
-| `Sebik 70% ▼` | Yellow | Sebik is losing health fast (more than 10% per second by default), listed even above their warning level. |
+| `Sebik 70% ▼` | Yellow | Sebik is losing health fast (more than 15% per second over at least two hits by default), listed even above their warning level. |
 | `Sebik 38% (150 away)` | Yellow | A distance warning: 150 units from you, farther than the distance warning setting (70 units by default). |
 | `Sebik 38% (other zone)` | Yellow | A distance warning for someone in a different zone. |
 | `Sebik 95%` | White | A pinned player at healthy HP. |
@@ -48,9 +48,11 @@ Long names are shortened with … so the health and tags always stay visible.
 
 Group and raid members show in yellow once they drop below their class's warning level and in red below its critical level: 40% / 25% for melee, 60% / 40% for hybrid casters and 75% / 50% for pure casters by default, since they die very fast. Both levels can be changed per class under **Health thresholds…**. Your own pets and your group members' pets are included, sorted in with the players by health. Raid members' pets aren't, because Zeal doesn't send them.
 
+Your own characters are never listed, since you can see your own health bar. That covers every character logged in on one of your EverQuest windows, for their health, dropping fast, death and charmer alerts and sounds alike. Their pets still show. Pin one of your own characters to see its health anyway.
+
 ### Dropping fast
 
-A player losing health quickly gets ▼ after their health, e.g. `Sebik 70% ▼`, and is listed even while still above their warning level. A tank at 90% taking a rampage is in more danger than a caster sitting at 45%, and the marker catches that before the health number does. By default, "fast" means losing more than 10% of their health per second; change it on the Dropping fast row of **Alert types & sounds…**. The marker stays for a moment after the drop slows, so it doesn't flicker between hits.
+A player losing health quickly gets ▼ after their health, e.g. `Sebik 70% ▼`, and is listed even while still above their warning level. A tank at 90% taking a rampage is in more danger than a caster sitting at 45%, and the marker catches that before the health number does. By default, "fast" means losing more than 15% of their health per second; change it on the Dropping fast row of **Alert types & sounds…**. The loss has to come from at least two separate hits within that second: one big hit, or a caster's own mana-conversion spell, is a spike rather than a fall and doesn't count, while a rampage or a pet turning on its charmer does. The marker stays for a moment after the drop slows, so it doesn't flicker between hits. Each time it fires, `triage.log` gets a line with the name and the rate, so you can check afterwards why someone was listed.
 
 Someone dropping fast is sorted by where they will be in a couple of seconds at that rate, so a fast fall ranks above a steady low. Pets don't get the marker.
 
@@ -115,8 +117,8 @@ The **EQ Triage window** opens on the desktop where you started EQ Triage and ha
 
 - **Move:** drag the *Triage* header of the overlay.
 - **Preview:** under *Overlay*, fills the overlay with one of each row type for 10 seconds, so you can check its size, width and position without waiting for someone to get hurt.
-- **Hide / Show:** under *Overlay*, hides the overlay without quitting, for example while trading or AFK.
-- **Recenter:** under *Overlay*, moves the overlay back to the top center of the screen if it ever ends up off-screen. It works even when the position is locked.
+- **Hide / Show:** under *Overlay*, hides the overlay without quitting, for example while trading or AFK. Sounds keep playing while it's hidden.
+- **Recenter:** under *Overlay*, moves the overlay back to the top center of the screen if it ever ends up off-screen. It works even when the position is locked. EQ Triage also recenters on its own at startup when the saved position is on no screen, for example after unplugging a monitor.
 - **Lock position:** under *Overlay*, stops the header from being dragged. While locked, clicks on the header go straight through to the game like the rest of the overlay; the pins still work. The lock is remembered between sessions.
 - **Pin / unpin:** click the pin at the right of a player row, or use *Pinned players* in the EQ Triage window.
 - **This page:** click **Read the docs**.
@@ -144,7 +146,7 @@ The EQ Triage window groups its settings by what they control. Changes apply to 
 
 To use your own sound, pick **Custom file…** at the bottom of the list and choose a `.wav` file; the picker then shows its name, e.g. *Custom: tell.wav*. Only WAV files are supported, since that's what Windows' built-in sound player plays. If the file is later moved or deleted, that alert plays its default built-in sound instead. Restore defaults clears custom files.
 
-The **Dropping fast (▼)** row also sets how fast is fast: 10% HP per second by default, from 3 to 50.
+The **Dropping fast (▼)** row also sets how fast is fast: 15% HP per second by default, from 3 to 50, always over at least two hits. If you set up EQ Triage before this default changed, your saved 10% stays until you press **Restore defaults** or change it here.
 
 | Alert | Shown by default | Sound on by default | Default sound |
 |---|---|---|---|
@@ -155,6 +157,8 @@ The **Dropping fast (▼)** row also sets how fast is fast: 10% HP per second by
 | Death | Yes | No | Low gong |
 | Dropping fast (▼) | Yes | No | Alarm pulses |
 | Pets | Yes | — | — |
+
+Pets have no sound of their own: a pet at low health sounds through the Warning or Critical health sound when that one is on, like a player would.
 
 Sounds play when an alert starts, not continuously. When several start at once, only the most urgent is heard (charmer hit, then charm break, death, dropping fast, critical, warning). The same alert for the same player won't sound again within 10 seconds, and being healed from red back into yellow is silent. Starting EQ Triage mid-fight doesn't sound for alerts that were already happening. Volume follows your Windows volume. The sounds are generated by EQ Triage itself, so there are no audio files to install.
 
@@ -192,6 +196,9 @@ Everything lives in the `EQTriage` folder:
 - `position.json`: where you last dragged the overlay. Created the first time you move it.
 - `pins.json`: your pinned players. Created the first time you pin someone.
 - `settings.json`: your settings. Created the first time you change one.
+- `triage.log`: a short log of connections, charm breaks, charmer hits, deaths, dropping-fast triggers and any errors, for troubleshooting. It's kept small (one older copy, `triage.log.1`, is retained) and contains only what EQ Triage saw: character names, alerts and technical messages.
+
+Only one EQ Triage runs at a time. Starting it again while it's running just shows a note and leaves the first one alone.
 
 The EQ Triage window shows the version you're running next to its name. Each time it starts, it asks GitHub whether there's a newer release, and if so a line appears under the status: *EQ Triage 1.1.0 is available. Download it*. That request is the only thing EQ Triage sends over the internet, and it sends nothing about you or your characters. Without an internet connection the check is simply skipped.
 
@@ -214,3 +221,5 @@ Start with the status line at the top of the EQ Triage window. It checks the con
 - **Overlay is empty while the status is green:** that's normal when nobody is hurt. Click **Preview** to check it's on screen, or set **All classes** to warning below 100% under **Health thresholds…** for a moment to see real data flowing.
 - **Can't see the overlay at all:** check it isn't hidden (the button under *Overlay* says **Show**), then click **Recenter**.
 - **Can't drag the overlay:** untick **Lock position** under *Overlay*.
+- **Rows blink on and off:** EQ Triage treats data older than 2 seconds as gone. If you raised Zeal's `/pipedelay` above about 1500 ms, set it back down (the default is 100).
+- **Something else is wrong:** look at `triage.log` in the EQ Triage folder; the last lines usually say what happened.

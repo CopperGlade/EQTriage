@@ -6,13 +6,15 @@ dist/
 # Python
 __pycache__/
 *.py[cod]
+.pytest_cache/
 .venv/
 venv/
 
-# Per-user state written next to the script or exe
+# Per-user state and the troubleshooting log, written next to the script or exe
 position.json
 pins.json
 settings.json
+triage.log*
 
 # Local notes for Claude Code, not published
 CLAUDE.md

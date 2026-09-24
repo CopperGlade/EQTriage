@@ -9,6 +9,8 @@ import collections
 import csv
 import ctypes
 import json
+import logging
+import logging.handlers
 import math
 import os
 import re
@@ -22,7 +24,7 @@ import time
 import urllib.request
 import wave
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, QUrl
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QColor, QCursor, QDesktopServices, QFont, QFontMetrics, QIcon, QPainter, QPainterPath, QPen, QPixmap,
 )
@@ -33,6 +35,10 @@ from PySide6.QtWidgets import (
 
 APP_NAME = 'EQ Triage'
 APP_ID = 'SebikEuropa.EQTriage'
+UNKNOWN_VERSION = '0.0.0'
+LOG_BYTES = 200_000
+ERROR_ALREADY_EXISTS = 183
+MB_ICONINFORMATION = 0x40
 PIPE_DIR = '\\\\.\\pipe\\'
 PIPE_PREFIX = 'zeal_'
 LOG_TYPE = 0
@@ -93,16 +99,20 @@ SAMPLE_ROWS = [
     (CHARM_BREAK_PREFIX, 'Sebik', '', CHARMER_COLOR, None),
     ('DEAD ', 'Sebik', '', DEATH_COLOR, None),
     ('', 'Sebik', ' 22%', CRITICAL_HP_COLOR, None),
+    ('', 'Sebik', ' 70% \u25bc', LOW_HP_COLOR, None),
     ('', 'Sebik', ' pet 41%', LOW_HP_COLOR, None),
     ('', 'Sebik', ' 38% (150 away)', LOW_HP_COLOR, None),
 ]
 # Dropping fast: HP lost per second, measured over a short window and held briefly so the marker doesn't flicker.
+# The loss must come from at least DROP_MIN_DROPS separate readings going down, so one big hit or a self-damaging
+# mana spell is a spike, not a fall, while a rampage or a pet turning on its charmer still counts within a second.
 DROP_MARKER = ' \u25bc'
 DROP_WINDOW_SECONDS = 1.0
 DROP_MIN_SPAN_SECONDS = 0.5
+DROP_MIN_DROPS = 2
 DROP_HOLD_SECONDS = 1.5
 DROP_PROJECT_SECONDS = 2.0
-DEFAULT_DROP_RATE = 10
+DEFAULT_DROP_RATE = 15
 DROP_RATE_RANGE = (3, 50)
 # Scope setting: the entire raid shows unless raid groups are unticked; the active character's own group always shows.
 RAID_GROUPS = 12
@@ -131,6 +141,8 @@ SHADOW_COLOR = QColor(0, 0, 0, 210)
 APP_DIR = os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__))
 POSITION_FILE = os.path.join(APP_DIR, 'position.json')
 PINS_FILE = os.path.join(APP_DIR, 'pins.json')
+# The windowed exe has no console, so messages go to a small rolling log next to it for troubleshooting.
+LOG_FILE = os.path.join(APP_DIR, 'triage.log')
 DOCS_URL = 'https://github.com/CopperGlade/EQTriage#readme'
 LATEST_RELEASE_API = 'https://api.github.com/repos/CopperGlade/EQTriage/releases/latest'
 UPDATE_TIMEOUT_SECONDS = 10
@@ -208,6 +220,8 @@ SOUND_REPEAT_SECONDS = 10.0
 SOUND_RATE = 44100
 SOUND_PEAK = 0.6
 SOUND_DIR = os.path.join(tempfile.gettempdir(), 'EQTriage-sounds')
+# Rendered WAVs are kept between runs. Bump this whenever a voice changes, so the old files are rendered again.
+SOUND_VERSION = 1
 
 GWL_EXSTYLE = -20
 WS_EX_TRANSPARENT = 0x00000020
@@ -218,6 +232,8 @@ SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
 SWP_NOACTIVATE = 0x0010
 
+log = logging.getLogger('triage')
+
 state_lock = threading.Lock()
 members = {}
 pet_hp = {}
@@ -227,6 +243,8 @@ own_locations = {}
 member_locations = {}
 charmer_hits = {}
 hp_seen = {}
+# Name -> pipe -> recent (time, HP %) readings. Each client's readings are kept apart because another client's
+# view can lag, and mixing them would look like a heal or a hit that never happened.
 hp_history = {}
 dropping_until = {}
 member_classes = {}
@@ -269,7 +287,7 @@ def handle_members(entries, pipe_name):
                 member_locations[(pipe_name, entry['name'])] = (location(entry['loc']), now)
             if entry.get('class') in CLASSES:
                 member_classes[entry['name']] = entry['class']
-            # Only raid entries carry a group: its number as text ("1" to "12"), or "Ungrouped".
+            # Only raid entries carry a group: its number as text ("1" to "12"), or "0" when ungrouped.
             if 'group' in entry:
                 raid_groups[entry['name']] = (str(entry['group']), now)
             if 'hp_current' not in entry:
@@ -277,7 +295,7 @@ def handle_members(entries, pipe_name):
                 # without HP means /pipeverbose is off.
                 if 'spawn_id' in entry:
                     if not verbose_missing:
-                        print('Group/raid data has no HP. Enable it in game with: /pipeverbose on')
+                        log.warning('Group/raid data has no HP. Enable it in game with: /pipeverbose on')
                     verbose_missing = True
                 continue
             verbose_missing = False
@@ -285,7 +303,7 @@ def handle_members(entries, pipe_name):
             if maximum <= 0:
                 continue
             members[name] = (current * 100 / maximum, now)
-            history = hp_history.setdefault(name, collections.deque())
+            history = hp_history.setdefault(name, {}).setdefault(pipe_name, collections.deque())
             history.append((now, current * 100 / maximum))
             while history and now - history[0][0] > DROP_WINDOW_SECONDS:
                 history.popleft()
@@ -294,7 +312,7 @@ def handle_members(entries, pipe_name):
             hp_seen[(pipe_name, name)] = (current, maximum)
             if previous and previous[1] == maximum and current < previous[0] and is_watched(name, now):
                 if now - charmer_hits.get(name, -CHARMER_HIT_SECONDS) >= CHARMER_HIT_SECONDS:
-                    print(f'CHARMER HIT {name} took damage after a charm break ({previous[0]} -> {current} HP)')
+                    log.info(f'CHARMER HIT {name} took damage after a charm break ({previous[0]} -> {current} HP)')
                 charmer_hits[name] = now
 
 
@@ -312,7 +330,7 @@ def handle_log(entry, character):
         if name not in members and name != character:
             return
         if now - deaths.get(name, -DEATH_SECONDS) >= DEATH_SECONDS:
-            print(f'DEAD {name}: {text}')
+            log.info(f'DEAD {name}: {text}')
         deaths[name] = now
 
 
@@ -389,7 +407,7 @@ class PetWatcher:
                 return
             charm_breaks[owner] = (pet['name'], now)
         hp = pet['value'] * 100 / GAUGE_FULL
-        print(f'CHARM BREAK? {owner} lost {pet["name"] or "pet"} at {hp:.0f}% ({self.pipe_name})')
+        log.info(f'CHARM BREAK? {owner} lost {pet["name"] or "pet"} at {hp:.0f}% ({self.pipe_name})')
 
     def clear_if_recharmed(self, owner):
         with state_lock:
@@ -403,48 +421,68 @@ class PetWatcher:
             for gauge_type in (member_type, member_type + PET_GAUGE_OFFSET):
                 gauge = by_type.get(gauge_type)
                 if gauge != self.last_gauges.get(gauge_type):
-                    print(f'{self.pipe_name} gauge {gauge_type}: {gauge}')
+                    log.info(f'{self.pipe_name} gauge {gauge_type}: {gauge}')
                     self.last_gauges[gauge_type] = gauge
 
 
-def read_pipe(name, args):
+def read_messages(pipe):
+    # Yields each JSON object from a byte stream of objects written back to back with no delimiter, however the
+    # chunks split them.
     decoder = json.JSONDecoder()
     utf8 = codecs.getincrementaldecoder('utf-8')(errors='replace')
-    watcher = PetWatcher(name, args.dump)
     buf = ''
+    while chunk := pipe.read(65536):
+        buf += utf8.decode(chunk)
+        while buf:
+            buf = buf.lstrip()
+            try:
+                message, end = decoder.raw_decode(buf)
+            except json.JSONDecodeError:
+                break
+            buf = buf[end:]
+            yield message
+        if len(buf) > MAX_BUFFER:
+            buf = ''
+
+
+def handle_message(message, pipe_name, watcher):
+    character = message.get('character') or ''
+    if character and pipe_characters.get(pipe_name) != character:
+        with state_lock:
+            pipe_characters[pipe_name] = character
+    kind = message.get('type')
+    if kind in (GROUP_TYPE, RAID_TYPE):
+        handle_members(json.loads(message['data']), pipe_name)
+    elif kind == GAUGE_TYPE:
+        watcher.handle_gauges(json.loads(message['data']), character)
+    elif kind == PLAYER_TYPE:
+        handle_player(json.loads(message['data']), pipe_name)
+    elif kind == LOG_TYPE:
+        handle_log(json.loads(message['data']), character)
+
+
+def read_pipe(name, args):
+    watcher = PetWatcher(name, args.dump)
+    warned = False
     try:
         with open(PIPE_DIR + name, 'rb', buffering=0) as pipe:
-            print(f'connected {name}')
-            while chunk := pipe.read(65536):
-                buf += utf8.decode(chunk)
-                while buf:
-                    buf = buf.lstrip()
-                    try:
-                        message, end = decoder.raw_decode(buf)
-                    except json.JSONDecodeError:
-                        break
-                    buf = buf[end:]
-                    character = message.get('character')
-                    if character and pipe_characters.get(name) != character:
-                        with state_lock:
-                            pipe_characters[name] = character
-                    if message.get('type') in (GROUP_TYPE, RAID_TYPE):
-                        handle_members(json.loads(message['data']), name)
-                    elif message.get('type') == GAUGE_TYPE:
-                        watcher.handle_gauges(json.loads(message['data']), message.get('character', ''))
-                    elif message.get('type') == PLAYER_TYPE:
-                        handle_player(json.loads(message['data']), name)
-                    elif message.get('type') == LOG_TYPE:
-                        handle_log(json.loads(message['data']), message.get('character', ''))
-                if len(buf) > MAX_BUFFER:
-                    buf = ''
+            log.info(f'connected {name}')
+            for message in read_messages(pipe):
+                # A message this version doesn't understand (say, after a Zeal update changes a field) is skipped,
+                # so one surprise can't take the whole feed down. Only the first is logged, to keep the log small.
+                try:
+                    handle_message(message, name, watcher)
+                except Exception:
+                    if not warned:
+                        log.exception(f'{name}: could not handle a message (later ones like it are not logged)')
+                        warned = True
     except OSError as error:
-        print(f'{name}: {error}')
+        log.warning(f'{name}: {error}')
     finally:
         with state_lock:
             connected.discard(name)
             pipe_characters.pop(name, None)
-        print(f'disconnected {name}')
+        log.info(f'disconnected {name}')
 
 
 def running_eq_pids():
@@ -498,22 +536,45 @@ def limits(settings, name, pet=False):
     return threshold['list'], threshold['red']
 
 
-def drop_rate(name):
-    # HP % lost per second across the recent window, or 0 without enough history. Needs state_lock.
-    history = hp_history.get(name)
+def history_rate(history):
+    # HP % lost per second across one client's recent readings, or 0 without enough of them or when the loss came
+    # in fewer than DROP_MIN_DROPS separate drops.
     if not history:
         return 0.0
     (start, start_pct), (end, end_pct) = history[0], history[-1]
     if end - start < DROP_MIN_SPAN_SECONDS:
         return 0.0
+    drops = sum(1 for (_, before), (_, after) in zip(history, list(history)[1:]) if after < before)
+    if drops < DROP_MIN_DROPS:
+        return 0.0
     return (start_pct - end_pct) / (end - start)
 
 
+def drop_rate(name):
+    # The fastest fall any client has seen for this player. Needs state_lock.
+    return max((history_rate(history) for history in hp_history.get(name, {}).values()), default=0.0)
+
+
+def update_dropping(settings):
+    # Anyone losing health faster than the setting is held in dropping_until for a moment, so the marker doesn't
+    # flicker between hits. Called once per overlay refresh, before the rows and sounds are read.
+    now = time.monotonic()
+    with state_lock:
+        for name, (pct, seen) in members.items():
+            if now - seen >= STALE_SECONDS:
+                continue
+            rate = drop_rate(name)
+            if rate >= settings['drop_rate']:
+                if dropping_until.get(name, 0) <= now:
+                    log.info(f'DROPPING {name} at {pct:.0f}% losing {rate:.0f}% per second')
+                dropping_until[name] = now + DROP_HOLD_SECONDS
+
+
 def listed(readings, settings, now, pet=False, dropping=None):
-    # (distance above their critical level, HP %, name, critical level) for each fresh reading below its warning
-    # level whose band is switched on, plus anyone dropping fast even above it. Sorting by distance puts whoever is
-    # closest to their own critical level first; for someone dropping fast the distance is measured from where they
-    # will be a moment from now at their current rate, so a fast fall ranks above a slow low.
+    # (distance above their critical level, HP %, name, warning level, critical level) for each fresh reading below
+    # its warning level whose band is switched on, plus anyone dropping fast even above it. Sorting by distance puts
+    # whoever is closest to their own critical level first; for someone dropping fast the distance is measured from
+    # where they will be a moment from now at their current rate, so a fast fall ranks above a slow low.
     dropping = dropping or {}
     entries = []
     for name, (pct, seen) in readings.items():
@@ -521,7 +582,7 @@ def listed(readings, settings, now, pet=False, dropping=None):
         banded = pct < list_hp and settings['show']['critical' if pct < red_hp else 'low']
         if now - seen < STALE_SECONDS and (banded or name in dropping):
             projected = pct - dropping.get(name, 0) * DROP_PROJECT_SECONDS
-            entries.append((projected - red_hp, pct, name, red_hp))
+            entries.append((projected - red_hp, pct, name, list_hp, red_hp))
     return sorted(entries)
 
 
@@ -570,26 +631,31 @@ def with_distance(row, distance):
 def snapshot(settings, now):
     # What the overlay and the sounds both work from, with switched-off event types left out. Needs state_lock.
     show = settings['show']
+    # Your own characters (one per connected EverQuest window) are never listed, since you can see your own health
+    # bar; a pinned one still shows its health. Their pets are, because only their own client reports them.
+    own = set(pipe_characters.values())
     hp = {name: pct for name, (pct, seen) in members.items() if now - seen < STALE_SECONDS}
     member_limits = {name: limits(settings, name) for name in hp}
-    dead = sorted(name for name, at in deaths.items() if now - at < DEATH_SECONDS) if show['death'] else []
+    dead = sorted(
+        name for name, at in deaths.items() if now - at < DEATH_SECONDS and name not in own
+    ) if show['death'] else []
     charmers_hit = sorted(
-        (name for name, hit in charmer_hits.items() if now - hit < CHARMER_HIT_SECONDS and name not in dead),
+        (name for name, hit in charmer_hits.items()
+         if now - hit < CHARMER_HIT_SECONDS and name not in dead and name not in own),
         key=lambda n: hp.get(n, 100),
     ) if show['charmer_hit'] else []
     breaks = [
         owner for owner, (_, at) in charm_breaks.items()
-        if now - at < ALERT_SECONDS and owner not in charmers_hit and owner not in dead
+        if now - at < ALERT_SECONDS and owner not in charmers_hit and owner not in dead and owner not in own
     ] if show['charm_break'] else []
-    rates = {name: drop_rate(name) for name in hp}
-    for name, rate in rates.items():
-        if rate >= settings['drop_rate']:
-            dropping_until[name] = now + DROP_HOLD_SECONDS
-    # Name -> current rate for everyone marked as dropping fast.
+    # Name -> current rate for everyone marked as dropping fast (see update_dropping).
     dropping = {}
     if show['dropping']:
-        dropping = {name: max(rates[name], 0) for name, until in dropping_until.items() if until > now and name in hp}
-    low = listed(members, settings, now, dropping=dropping)
+        dropping = {
+            name: max(drop_rate(name), 0) for name, until in dropping_until.items()
+            if until > now and name in hp and name not in own
+        }
+    low = [entry for entry in listed(members, settings, now, dropping=dropping) if entry[2] not in own]
     low_pets = listed(pet_hp, settings, now, pet=True) if show['pets'] else []
     return hp, member_limits, dead, charmers_hit, breaks, low, low_pets, dropping
 
@@ -639,8 +705,8 @@ def alert_rows(settings, pinned, origin=None):
     flagged = [name for name in charmers_hit + breaks + dead if name not in pinned]
     rows = [status_row(name, hp, member_limits, dead, charmers_hit, breaks) for name in pinned + flagged]
     shown = set(pinned) | set(flagged)
-    players = [(margin, pct, name, '', red_hp, name) for margin, pct, name, red_hp in low if name not in shown]
-    pets = [(margin, pct, owner, ' pet', red_hp, None) for margin, pct, owner, red_hp in low_pets]
+    players = [(margin, pct, name, '', red_hp, name) for margin, pct, name, _, red_hp in low if name not in shown]
+    pets = [(margin, pct, owner, ' pet', red_hp, None) for margin, pct, owner, _, red_hp in low_pets]
     rows += [
         ('', name, f'{label} {int(pct)}%', hp_color(pct, red_hp), key)
         for _, pct, name, label, red_hp, key in sorted(players + pets, key=lambda row: row[:4])
@@ -652,14 +718,6 @@ def alert_rows(settings, pinned, origin=None):
     if verbose_missing:
         rows.insert(0, VERBOSE_ROW)
     return padded(rows, settings['rows'])
-
-
-def limits_by_name(settings, name):
-    # Warning level for an event's name; pets carry " pet" after the owner's name.
-    with state_lock:
-        if name.endswith(' pet'):
-            return limits(settings, name[:-len(' pet')], pet=True)[0]
-        return limits(settings, name)[0]
 
 
 def current_events(settings, origin=None):
@@ -677,8 +735,10 @@ def current_events(settings, origin=None):
     events |= {('dropping', name) for name in dropping if keep is None or keep(name)}
     events |= {('charmer_hit', name) for name in charmers_hit}
     events |= {('charm_break', name) for name in breaks}
-    for _, pct, name, red_hp in low + [(m, pct, f'{owner} pet', red_hp) for m, pct, owner, red_hp in low_pets]:
-        list_hp = limits_by_name(settings, name)
+    # Pets are named "owner pet", so a pet and its owner are separate events. Someone listed only for dropping
+    # fast is still above their warning level, so they get no health event.
+    pets = [(margin, pct, f'{owner} pet', list_hp, red_hp) for margin, pct, owner, list_hp, red_hp in low_pets]
+    for _, pct, name, list_hp, red_hp in low + pets:
         if pct < list_hp:
             events.add(('critical' if pct < red_hp else 'low', name))
     return events
@@ -780,16 +840,30 @@ SOUNDS = {
 PICKER_CHARS = max(len(name) for name, _ in SOUNDS.values())
 
 
+def sound_path(key):
+    return os.path.join(SOUND_DIR, f'{key}-{SOUND_VERSION}.wav')
+
+
 def write_sound(key):
+    # Rendering takes a noticeable moment in pure Python, so a WAV left by an earlier run is reused. The file is
+    # written under a temporary name first, so a half-written one is never played.
+    path = sound_path(key)
+    if os.path.isfile(path):
+        return path
     samples = SOUNDS[key][1]()
     peak = max(abs(value) for value in samples) or 1
-    path = os.path.join(SOUND_DIR, f'{key}.wav')
     os.makedirs(SOUND_DIR, exist_ok=True)
-    with wave.open(path, 'wb') as file:
+    partial = f'{path}.{os.getpid()}-{threading.get_ident()}.part'
+    with wave.open(partial, 'wb') as file:
         file.setnchannels(1)
         file.setsampwidth(2)
         file.setframerate(SOUND_RATE)
         file.writeframes(b''.join(struct.pack('<h', int(SOUND_PEAK * value / peak * 32767)) for value in samples))
+    try:
+        os.replace(partial, path)
+    except OSError:
+        # Another thread finished the same file first; its copy is as good.
+        os.remove(partial)
     return path
 
 
@@ -800,14 +874,20 @@ def play_sound(path):
 
 class SoundAlerts:
     def __init__(self, settings):
-        # Sounds are written on first use; the ones currently picked are written up front so alerts play instantly.
+        # Sounds are written on first use. The ones currently picked are written in the background at startup, so
+        # the windows appear at once and the alerts still play instantly a moment later.
         self.files = {}
-        for key in set(settings['sound_choice'].values()) - {CUSTOM_SOUND}:
-            self.file(key)
         self.active = None
         self.last_played = {}
+        chosen = set(settings['sound_choice'].values()) - {CUSTOM_SOUND}
+        threading.Thread(target=self.prepare, args=(chosen,), name='sounds', daemon=True).start()
+
+    def prepare(self, keys):
+        for key in keys:
+            self.file(key)
 
     def file(self, key):
+        # Two threads writing the same key at once is harmless: write_sound keeps whichever finishes first.
         if key not in self.files:
             self.files[key] = write_sound(key)
         return self.files[key]
@@ -821,7 +901,10 @@ class SoundAlerts:
                 play_sound(path)
                 return
             choice = DEFAULT_SOUNDS[event_type]
-        play_sound(self.file(choice))
+        try:
+            play_sound(self.file(choice))
+        except OSError as error:
+            log.warning(f'could not play {choice}: {error}')
 
     def update(self, settings, events):
         previous, self.active = self.active, events
@@ -857,7 +940,7 @@ def save_json(path, data):
         with open(path, 'w', encoding='utf-8') as file:
             json.dump(data, file)
     except OSError as error:
-        print(f'could not save {os.path.basename(path)}: {error}')
+        log.warning(f'could not save {os.path.basename(path)}: {error}')
 
 
 def load_position():
@@ -996,6 +1079,11 @@ class TriageWindow(QWidget):
         self.move(*self.default_position())
         save_position(self.x(), self.y())
 
+    def on_screen(self, x, y):
+        # A position saved with a monitor that is no longer there would put the overlay where nobody can see it.
+        rect = QRect(x, y, self.width(), self.height())
+        return any(screen.geometry().intersects(rect) for screen in QApplication.screens())
+
     def start(self):
         ctypes.windll.user32.GetForegroundWindow.restype = ctypes.c_void_p
         self.set_ex_style(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, True)
@@ -1025,6 +1113,7 @@ class TriageWindow(QWidget):
         self.previous_foreground = None
 
     def refresh(self):
+        update_dropping(self.settings)
         rows = self.current_rows()
         if not self.previewing():
             self.sounds.update(self.settings, current_events(self.settings, self.active_pipe()))
@@ -1175,8 +1264,12 @@ class TriageWindow(QWidget):
 
 
 def read_app_version():
-    with open(os.path.join(BUNDLE_DIR, 'version_info.txt'), encoding='utf-8') as file:
-        return re.search(r"ProductVersion', '([0-9.]+)'", file.read()).group(1)
+    # Without the file (say, the script copied on its own) the app still runs, just without an update check.
+    try:
+        with open(os.path.join(BUNDLE_DIR, 'version_info.txt'), encoding='utf-8') as file:
+            return re.search(r"ProductVersion', '([0-9.]+)'", file.read()).group(1)
+    except (OSError, AttributeError):
+        return UNKNOWN_VERSION
 
 
 APP_VERSION = read_app_version()
@@ -1189,6 +1282,8 @@ def version_tuple(text):
 def check_for_update():
     # Asks GitHub once for the latest published release. Offline or rate-limited just means no notice.
     global newer_release
+    if APP_VERSION == UNKNOWN_VERSION:
+        return
     request = urllib.request.Request(LATEST_RELEASE_API, headers={
         'Accept': 'application/vnd.github+json', 'User-Agent': f'EQTriage/{APP_VERSION}',
     })
@@ -1546,8 +1641,9 @@ class AlertTypesDialog(QDialog):
         self.drop_rate = QSpinBox()
         self.drop_rate.setRange(*DROP_RATE_RANGE)
         self.drop_rate.setSuffix('% HP per second')
-        self.drop_rate.setToolTip('A player losing health faster than this gets \u25bc after their health, '
-                                  'and is listed even above their warning level.')
+        self.drop_rate.setToolTip('A player losing health faster than this, over at least two hits within a second, '
+                                  'gets \u25bc after their health and is listed even above their warning level. '
+                                  'A single big hit doesn\'t count.')
         self.drop_rate.valueChanged.connect(self.change_drop_rate)
         for index, (key, (label, _, has_sound)) in enumerate(EVENTS.items()):
             if index:
@@ -1797,29 +1893,70 @@ def app_icon():
     return icon
 
 
+def setup_logging():
+    # Messages go to triage.log next to the exe (kept small, one older copy), and to the console when there is
+    # one. Errors that would otherwise vanish in a windowed exe are logged too.
+    log.setLevel(logging.INFO)
+    layout = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+    handlers = []
+    try:
+        handlers.append(logging.handlers.RotatingFileHandler(
+            LOG_FILE, maxBytes=LOG_BYTES, backupCount=1, encoding='utf-8'
+        ))
+    except OSError:
+        pass
+    if sys.stderr is not None:
+        handlers.append(logging.StreamHandler(sys.stderr))
+    for handler in handlers:
+        handler.setFormatter(layout)
+        log.addHandler(handler)
+    sys.excepthook = lambda *error: log.error('unhandled error', exc_info=error)
+    threading.excepthook = lambda args: log.error(
+        f'unhandled error in thread {args.thread.name if args.thread else "?"}',
+        exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+    )
+
+
+def already_running():
+    # A named mutex lives as long as this process, so a second EQ Triage finds it and stops instead of putting a
+    # second overlay and a second set of sounds over the first.
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    kernel32.CreateMutexW(None, False, APP_ID)
+    return ctypes.get_last_error() == ERROR_ALREADY_EXISTS
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=f'{APP_NAME}: on-screen alerts for low HP, charm breaks and charmers being hit.'
     )
-    parser.add_argument('--dump', action='store_true', help='print every change to the group and pet gauges')
+    parser.add_argument('--dump', action='store_true', help='log every change to the group and pet gauges')
     args = parser.parse_args()
+    setup_logging()
 
-    threading.Thread(target=scan_pipes, args=(args,), daemon=True).start()
-    threading.Thread(target=check_for_update, daemon=True).start()
+    if already_running():
+        ctypes.windll.user32.MessageBoxW(
+            None, f'{APP_NAME} is already running. Look for its window in the taskbar.', APP_NAME, MB_ICONINFORMATION
+        )
+        sys.exit(0)
+
+    threading.Thread(target=scan_pipes, args=(args,), name='pipes', daemon=True).start()
+    threading.Thread(target=check_for_update, name='update', daemon=True).start()
 
     # Without its own app ID, a script run by python.exe is grouped under Python's taskbar icon.
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
     app = QApplication(sys.argv[:1])
     app.setWindowIcon(app_icon())
     window = TriageWindow(load_settings())
-    window.move(*(load_position() or window.default_position()))
+    position = load_position()
+    window.move(*(position if position and window.on_screen(*position) else window.default_position()))
     window.show()
     window.start()
     control = ControlWindow(window)
     control.show()
 
     signal.signal(signal.SIGINT, lambda *_: app.quit())
-    print('Watching for Zeal pipes. Quit from the EQ Triage window or Ctrl+C.')
+    log.info(f'{APP_NAME} {APP_VERSION} watching for Zeal pipes. Quit from the EQ Triage window or Ctrl+C.')
     sys.exit(app.exec())
 
 
