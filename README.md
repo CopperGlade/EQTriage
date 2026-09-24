@@ -6,7 +6,7 @@ EQ Triage sits on top of EverQuest and lists the people who need attention: play
 
 ## Setup
 
-1. **Install Zeal.** EQ Triage gets its data from Zeal's named pipe, so the Project Quarm client must be running with Zeal (`Zeal.asi` in your EverQuest folder). The pipe is on by default.
+1. **Install Zeal 1.4.6 or later.** EQ Triage gets its data from Zeal's named pipe, so the Project Quarm client must be running with Zeal (`Zeal.asi` in your EverQuest folder). The pipe is on by default. Get the [latest Zeal release](https://github.com/CoastalRedwood/Zeal/releases/latest) if yours is older: 1.4.6 added the spawn ids that the Distance overlay and the `/pipeverbose` reminder need. With an older Zeal the Triage overlay still lists health, but the Distance overlay stays empty.
 2. **Turn on detailed data, once.** In game, type `/pipeverbose on`. Without it, Zeal doesn't send player health. Zeal remembers the setting (`PipeVerbose=TRUE` in `zeal.ini`), so you only do this once. If the overlay shows a grey **Type /pipeverbose on** row, this step is missing.
 3. **Install EQ Triage.** Download `EQTriage-vX.Y.Z.zip` from the [latest release](https://github.com/CopperGlade/EQTriage/releases/latest) and extract it into your EverQuest folder, next to `eqgame.exe`, so you end up with, for example, `C:\QUARM\EQTriage\EQTriage.exe`.
 
@@ -112,6 +112,8 @@ EQ Triage has two overlays: the **Triage overlay**, the list described above, an
 Both cutoffs are set in the *Distance overlay* section, so other classes can match their own spells.
 
 > [!IMPORTANT]
+> The Distance overlay needs **Zeal 1.4.6 or later**, the first version that says what you're targeting. With an older Zeal it stays empty.
+>
 > The distance is only known for **player characters in your group or raid**. Zeal sends positions for nobody else, so a mob, any pet (including your own) or a player outside your group and raid shows `--` instead of a distance, and no target leaves the row empty. The section in the EQ Triage window says the same. The Distance overlay follows the character in the active EverQuest window and is dragged by its own header, with its own **Re-center**, **Lock position**, **Show header bar**, text size, background opacity and **Preview**, so it can be tuned for its spot beside the target window without touching the list. Nothing is shared between the two overlays.
 
 ### Pinning
@@ -253,5 +255,7 @@ Start with the status line at the top of the EQ Triage window. It checks the con
 - **Overlay is empty while the status is green:** that's normal when nobody is hurt. Click **Preview** to check it's on screen, or set **All classes** to warning below 100% under **Configure health thresholds** for a moment to see real data flowing.
 - **Can't see the overlay at all:** check **Show window** is ticked under *Triage overlay*, then click **Re-center**.
 - **Can't drag an overlay:** untick its **Lock position** (each overlay has its own). With **Show header bar** unticked there is no header to grab: click **Preview** and drag while the header shows.
+- **Distance overlay stays empty with a group member targeted:** your Zeal is older than 1.4.6. Install the [latest Zeal release](https://github.com/CoastalRedwood/Zeal/releases/latest) and restart EverQuest. A mob, a pet or a player outside your group and raid shows `--`, which is expected.
+- **Hurt group members never show up:** type `/pipeverbose on` in game. EQ Triage normally reminds you with a grey row and in the status line, but it can only tell that health is missing with Zeal 1.4.6 or later.
 - **Rows blink on and off:** EQ Triage treats data older than 2 seconds as gone. If you raised Zeal's `/pipedelay` above about 1500 ms, set it back down (the default is 100).
 - **Something else is wrong:** look at `triage.log` in the EQ Triage folder; the last lines usually say what happened.
