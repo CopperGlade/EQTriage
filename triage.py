@@ -972,6 +972,7 @@ def load_settings():
         settings[key] = min(max(int(value), minimum), maximum) if valid else default
     settings['thresholds'] = load_thresholds(saved)
     settings['locked'] = saved.get('locked') is True
+    settings['rows_only'] = saved.get('rows_only') is True
     settings['distance_warning'] = saved.get('distance_warning') is not False
     rate = saved.get('drop_rate')
     valid = isinstance(rate, (int, float)) and not isinstance(rate, bool)
@@ -1122,8 +1123,9 @@ class TriageWindow(QWidget):
             self.rows = rows
             self.update()
         over_pin = self.pin_key_at(cursor) is not None
-        # A locked overlay has no drag area, so its header lets clicks through like the rest of it.
-        over_header = not self.settings['locked'] and self.rect().contains(cursor) and cursor.y() < HEADER_HEIGHT
+        # A locked overlay, or one showing rows only, has no drag area, so its header band lets clicks through.
+        over_header = (self.frame_shown() and not self.settings['locked'] and self.rect().contains(cursor)
+                       and cursor.y() < HEADER_HEIGHT)
         self.setCursor(Qt.PointingHandCursor if over_pin else Qt.SizeAllCursor)
         self.set_passthrough(self.drag_offset is None and not over_header and not over_pin)
         ctypes.windll.user32.SetWindowPos(
@@ -1156,6 +1158,12 @@ class TriageWindow(QWidget):
     def previewing(self):
         return time.monotonic() < self.preview_until
 
+    def frame_shown(self):
+        # Rows only hides the header strip, its title and the bottom edge, leaving just the rows over the game. The
+        # overlay keeps its size, so the rows never move. Preview brings the frame back for its few seconds, since
+        # the header is the only way to drag the overlay into place.
+        return not self.settings['rows_only'] or self.previewing()
+
     def start_preview(self):
         self.preview_until = time.monotonic() + PREVIEW_SECONDS
         self.show()
@@ -1184,16 +1192,22 @@ class TriageWindow(QWidget):
         painter = QPainter(self)
         painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
         width = self.width()
+        frame = self.frame_shown()
+        # With rows only, the panel starts below the header band, which stays empty and transparent.
+        top = 0 if frame else HEADER_HEIGHT
         panel = QPainterPath()
-        panel.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), CORNER_RADIUS, CORNER_RADIUS)
+        panel.addRoundedRect(QRectF(0, top, width, self.height() - top).adjusted(0.5, 0.5, -0.5, -0.5),
+                             CORNER_RADIUS, CORNER_RADIUS)
 
         # Opacity fades the frame: background, outer border and row dividers. The header strip, its title and the
-        # bottom edge keep a fixed look, so the overlay can always be found and dragged by its header.
+        # bottom edge keep a fixed look, so the overlay can always be found and dragged by its header, unless rows
+        # only hides them.
         opacity = self.settings['opacity'] / 100
         painter.save()
         painter.setClipPath(panel)
-        painter.fillRect(QRectF(0, 0, width, HEADER_HEIGHT), HEADER_BACKING_COLOR)
-        painter.fillRect(QRectF(0, 0, width, HEADER_HEIGHT), HEADER_COLOR)
+        if frame:
+            painter.fillRect(QRectF(0, 0, width, HEADER_HEIGHT), HEADER_BACKING_COLOR)
+            painter.fillRect(QRectF(0, 0, width, HEADER_HEIGHT), HEADER_COLOR)
         body = QRectF(0, HEADER_HEIGHT, width, self.height() - HEADER_HEIGHT)
         painter.fillRect(body, QColor(*PANEL_RGB, round(255 * opacity)))
         painter.restore()
@@ -1204,15 +1218,16 @@ class TriageWindow(QWidget):
             painter.drawLine(QPointF(PADDING / 2, y), QPointF(width - PADDING / 2, y))
         painter.setPen(QPen(faded(EDGE_COLOR, opacity), 1))
         painter.drawPath(panel)
-        # The bottom edge stays at full strength, like the header, so the overlay's end is always visible.
-        bottom = self.height() - 0.5
-        painter.setPen(QPen(EDGE_COLOR, 1))
-        painter.drawLine(QPointF(CORNER_RADIUS, bottom), QPointF(width - CORNER_RADIUS, bottom))
-
-        header = QRectF(PADDING, 0, width - 2 * PADDING, HEADER_HEIGHT)
-        painter.setPen(HEADER_TEXT_COLOR)
-        painter.setFont(self.title_font)
-        painter.drawText(header, Qt.AlignVCenter | Qt.AlignLeft, 'Triage (preview)' if self.previewing() else 'Triage')
+        if frame:
+            # The bottom edge stays at full strength, like the header, so the overlay's end is always visible.
+            bottom = self.height() - 0.5
+            painter.setPen(QPen(EDGE_COLOR, 1))
+            painter.drawLine(QPointF(CORNER_RADIUS, bottom), QPointF(width - CORNER_RADIUS, bottom))
+            header = QRectF(PADDING, 0, width - 2 * PADDING, HEADER_HEIGHT)
+            painter.setPen(HEADER_TEXT_COLOR)
+            painter.setFont(self.title_font)
+            painter.drawText(header, Qt.AlignVCenter | Qt.AlignLeft,
+                             'Triage (preview)' if self.previewing() else 'Triage')
 
         painter.setFont(self.row_font)
         for i, (prefix, name, suffix, color, key) in enumerate(self.rows):
@@ -1248,7 +1263,7 @@ class TriageWindow(QWidget):
         key = self.pin_key_at(event.position())
         if key:
             self.toggle_pin(key)
-        elif event.position().y() < HEADER_HEIGHT and not self.settings['locked']:
+        elif event.position().y() < HEADER_HEIGHT and not self.settings['locked'] and self.frame_shown():
             self.drag_offset = event.globalPosition().toPoint() - self.pos()
             self.take_focus()
 
@@ -1387,15 +1402,24 @@ class ControlWindow(QWidget):
         lock_box.setToolTip("Stop the overlay's header from being dragged, so a stray click can't move it.")
         lock_box.setChecked(overlay.settings['locked'])
         lock_box.toggled.connect(self.set_locked)
+        self.rows_only_box = QCheckBox('Rows only')
+        self.rows_only_box.setToolTip('Show just the rows over the game, without the Triage header or the bottom '
+                                      'edge. Preview shows them again for a moment so you can drag the overlay.')
+        self.rows_only_box.setChecked(overlay.settings['rows_only'])
+        self.rows_only_box.toggled.connect(self.set_rows_only)
         overlay_row = QHBoxLayout()
         overlay_row.addWidget(preview_button)
         overlay_row.addWidget(self.visibility_button)
         overlay_row.addWidget(reset_button)
+        boxes_row = QHBoxLayout()
+        boxes_row.addWidget(lock_box)
+        boxes_row.addWidget(self.rows_only_box)
+        boxes_row.addStretch()
         overlay_form = QFormLayout()
         self.add_spins(overlay_form, OVERLAY_SETTINGS)
         overlay_layout = QVBoxLayout(overlay_box)
         overlay_layout.addLayout(overlay_row)
-        overlay_layout.addWidget(lock_box)
+        overlay_layout.addLayout(boxes_row)
         overlay_layout.addLayout(overlay_form)
 
         alerts_box = QGroupBox('Alerts')
@@ -1532,12 +1556,17 @@ class ControlWindow(QWidget):
         self.overlay.settings['locked'] = locked
         save_json(SETTINGS_FILE, self.overlay.settings)
 
+    def set_rows_only(self, rows_only):
+        self.overlay.settings['rows_only'] = rows_only
+        self.save_and_redraw()
+
     def restore_defaults(self):
         for key, (default, *_) in SETTINGS.items():
             self.spins[key].setValue(default)
         self.overlay.settings['thresholds'] = default_thresholds()
         self.overlay.settings.update(event_defaults({}))
         self.distance_box.setChecked(True)
+        self.rows_only_box.setChecked(False)
         self.overlay.settings['hidden_groups'] = []
         self.overlay.settings['drop_rate'] = DEFAULT_DROP_RATE
         self.show_scope()

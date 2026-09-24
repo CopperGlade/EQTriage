@@ -6,6 +6,7 @@ import math
 import types
 
 import pytest
+from PySide6.QtCore import Qt
 
 import triage
 from conftest import REAL_WRITE_SOUND
@@ -595,6 +596,39 @@ def test_overlay_size_follows_the_settings_and_renders(qapp, settings):
     image = window.grab().toImage()
     assert not image.isNull() and image.size() == window.size()
     assert window.on_screen(0, 0) and not window.on_screen(100_000, 100_000)
+
+
+def test_rows_only_hides_the_header_and_bottom_edge_except_in_preview(qapp, settings):
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    settings['opacity'] = 0
+    window = triage.TriageWindow(settings)
+    window.rows = triage.padded(triage.SAMPLE_ROWS, settings['rows'])
+    mid = window.width() // 2
+    header, bottom = triage.HEADER_HEIGHT // 2, window.height() - 1
+
+    def alpha(y):
+        return window.grab().toImage().pixelColor(mid, y).alpha()
+
+    def press_header():
+        window.drag_offset = None
+        event = QMouseEvent(QEvent.MouseButtonPress, QPointF(mid, header), QPointF(mid, header),
+                            Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+        window.mousePressEvent(event)
+        return window.drag_offset is not None
+
+    assert alpha(header) > 0 and alpha(bottom) > 0 and press_header()
+    settings['rows_only'] = True
+    assert alpha(header) == 0 and alpha(bottom) == 0 and not press_header()
+    assert window.height() == triage.HEADER_HEIGHT + settings['rows'] * window.row_height + triage.ROW_GAP
+    window.preview_until = triage.time.monotonic() + 10
+    assert alpha(header) > 0 and alpha(bottom) > 0 and press_header()
+
+
+def test_rows_only_setting_is_saved_and_off_by_default(tmp_path, settings):
+    assert settings['rows_only'] is False
+    (tmp_path / 'settings.json').write_text(json.dumps({'rows_only': True}))
+    assert triage.load_settings()['rows_only'] is True
 
 
 def test_long_names_are_elided_but_tags_stay(qapp, settings):

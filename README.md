@@ -120,6 +120,7 @@ The **EQ Triage window** opens on the desktop where you started EQ Triage and ha
 - **Hide / Show:** under *Overlay*, hides the overlay without quitting, for example while trading or AFK. Sounds keep playing while it's hidden.
 - **Re-center:** under *Overlay*, moves the overlay back to the top center of the screen if it ever ends up off-screen. It works even when the position is locked. EQ Triage also re-centers on its own at startup when the saved position is on no screen, for example after unplugging a monitor.
 - **Lock position:** under *Overlay*, stops the header from being dragged. While locked, clicks on the header go straight through to the game like the rest of the overlay; the pins still work. The lock is remembered between sessions.
+- **Rows only:** under *Overlay*, hides the *Triage* header and the bottom edge, so nothing but the rows sits over the game. The rows stay exactly where they were. With no header there is nothing to drag, so **Preview** brings the header back for its 10 seconds whenever you need to move the overlay. *Background opacity* still applies to what's left (the rows' background, border and dividers); set it to 0% for text alone.
 - **Pin / unpin:** click the pin at the right of a player row, or use *Pinned players* in the EQ Triage window.
 - **This page:** click **Read the docs**.
 - **Close:** click **Quit**, or just close the EQ Triage window.
@@ -137,7 +138,7 @@ The EQ Triage window groups its settings by what they control. Changes apply to 
 |---|---|---|
 | Text size | 10 pt | Text size of the rows. The overlay resizes to match. |
 | Overlay width | 26 characters | How wide the overlay is, counted in characters of text so it grows with the text size. Widen it if long names get shortened with …. |
-| Background opacity | 70% | How visible the overlay's frame is, from 0% (fully clear) to 100% (solid): the dark background, the outer border and the lines between rows. The text, alert colors, pins, the *Triage* header and the bottom edge always stay fully visible, so at 0% you see just the rows between the header and a thin bottom line. |
+| Background opacity | 70% | How visible the overlay's frame is, from 0% (fully clear) to 100% (solid): the dark background, the outer border and the lines between rows. The text, alert colors, pins, the *Triage* header and the bottom edge always stay fully visible, so at 0% you see just the rows between the header and a thin bottom line. Tick **Rows only** to drop the header and bottom edge too. |
 | Number of rows | 10 | How many rows the overlay has, from 3 to 25. The overlay grows or shrinks to match. |
 
 **Alerts**: what gets listed, what makes a sound, and at what health. The Alerts section has two buttons that open their own windows, plus the distance warning.
@@ -220,6 +221,6 @@ Start with the status line at the top of the EQ Triage window. It checks the con
 
 - **Overlay is empty while the status is green:** that's normal when nobody is hurt. Click **Preview** to check it's on screen, or set **All classes** to warning below 100% under **Health thresholds…** for a moment to see real data flowing.
 - **Can't see the overlay at all:** check it isn't hidden (the button under *Overlay* says **Show**), then click **Re-center**.
-- **Can't drag the overlay:** untick **Lock position** under *Overlay*.
+- **Can't drag the overlay:** untick **Lock position** under *Overlay*. With **Rows only** ticked there is no header to grab: click **Preview** and drag while the header shows.
 - **Rows blink on and off:** EQ Triage treats data older than 2 seconds as gone. If you raised Zeal's `/pipedelay` above about 1500 ms, set it back down (the default is 100).
 - **Something else is wrong:** look at `triage.log` in the EQ Triage folder; the last lines usually say what happened.
