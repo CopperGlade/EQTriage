@@ -1,6 +1,6 @@
 # EQ Triage
 
-A healer's overlay for Project Quarm · v1.1.0 · by Sebik &lt;Europa&gt;
+A healer's overlay for Project Quarm · v1.2.0 · by Sebik &lt;Europa&gt;
 
 EQ Triage sits on top of EverQuest and lists the people who need attention: players and pets at low health, charm breaks, charmers being hit, deaths, and anyone too far away to heal. It only reads game data and draws on screen. It never presses keys or clicks for you.
 
@@ -101,7 +101,7 @@ Pets, `DEAD` rows and `CHARM BREAK` rows never show a distance. To turn distance
 
 ### Target distance window
 
-EQ Triage has two overlays: the **Triage overlay**, the list described above, and the **Distance overlay**, a tiny one-row window with the *Distance* header. Tick **Show window** under *Distance overlay* to turn it on. It shows one thing: the exact distance to your target, just the number (e.g. `45`), whenever the target is a member of your group or raid. It's small on purpose, meant to sit right beside EverQuest's own target window, which already shows the name. The color tells you which heals can reach them:
+EQ Triage has two overlays: the **Triage overlay**, the list described above, and the **Distance overlay**, a tiny one-row window with the *Distance* header. It's on by default; **Show window** under *Distance overlay* turns it off and on. It shows one thing: the exact distance to your target, just the number (e.g. `45`), whenever the target is a member of your group or raid. It's small on purpose, meant to sit right beside EverQuest's own target window, which already shows the name. The color tells you which heals can reach them:
 
 | Distance | Color | By default |
 |---|---|---|
@@ -112,7 +112,7 @@ EQ Triage has two overlays: the **Triage overlay**, the list described above, an
 Both cutoffs are set in the *Distance overlay* section, so other classes can match their own spells.
 
 > [!IMPORTANT]
-> The distance is only known for **player characters in your group or raid**. Zeal sends positions for nobody else, so a mob, any pet (including your own) or a player outside your group and raid shows `--` instead of a distance, and no target leaves the row empty. The section in the EQ Triage window says the same. The Distance overlay follows the character in the active EverQuest window, is on by default, and is dragged by its own header, with its own **Re-center**, **Lock position**, **Show header bar**, text size and background opacity, so it can be tuned for its spot beside the target window without touching the list. Nothing but Preview is shared between the two overlays.
+> The distance is only known for **player characters in your group or raid**. Zeal sends positions for nobody else, so a mob, any pet (including your own) or a player outside your group and raid shows `--` instead of a distance, and no target leaves the row empty. The section in the EQ Triage window says the same. The Distance overlay follows the character in the active EverQuest window and is dragged by its own header, with its own **Re-center**, **Lock position**, **Show header bar**, text size, background opacity and **Preview**, so it can be tuned for its spot beside the target window without touching the list. Nothing is shared between the two overlays.
 
 ### Pinning
 
@@ -218,21 +218,21 @@ The list is sorted by how close each person is to their own critical level, so a
 | Scope | Entire raid | In a raid, which raid groups' alerts show. Untick groups to hide them; your own group always shows. See [Raid focus](#raid-focus). |
 | Show distance beyond | On, 70 units | Listed players farther away than this show their distance, e.g. `(150 away)`. Untick it to turn distance warnings off. |
 
-Click **Preview** while you adjust the Overlay settings to see the effect. **Restore defaults**, at the bottom of the window, asks you to confirm and then resets everything: every setting, including the alert types, sounds, class thresholds and both overlays' looks, plus both overlays' positions and locks, and it removes all pinned players.
+Click an overlay's **Preview** while you adjust its **Other settings** to see the effect. **Restore defaults**, at the bottom of the window, asks you to confirm and then resets everything: every setting, including the alert types, sounds, class thresholds and both overlays' looks, plus both overlays' positions and locks, and it removes all pinned players.
 
 ## Files
 
 Everything lives in the `EQTriage` folder:
 
 - `EQTriage.exe`: the program.
-- `position.json`: where you last dragged the overlay and the target distance window. Created the first time you move one.
+- `position.json`: where you last dragged the Triage overlay and the Distance overlay. Created the first time you move one.
 - `pins.json`: your pinned players. Created the first time you pin someone.
 - `settings.json`: your settings. Created the first time you change one.
 - `triage.log`: a short log of connections, charm breaks, charmer hits, deaths, dropping-fast triggers and any errors, for troubleshooting. It's kept small (one older copy, `triage.log.1`, is retained) and contains only what EQ Triage saw: character names, alerts and technical messages.
 
 Only one EQ Triage runs at a time. Starting it again while it's running just shows a note and leaves the first one alone.
 
-The EQ Triage window shows the version you're running next to its name. Each time it starts, it asks GitHub whether there's a newer release, and if so a line appears under the status: *EQ Triage 1.1.0 is available. Download it*. That request is the only thing EQ Triage sends over the internet, and it sends nothing about you or your characters. Without an internet connection the check is simply skipped.
+The EQ Triage window shows the version you're running next to its name. Each time it starts, it asks GitHub whether there's a newer release, and if so a line appears under the status: *EQ Triage 1.3.0 is available. Download it*. That request is the only thing EQ Triage sends over the internet, and it sends nothing about you or your characters. Without an internet connection the check is simply skipped.
 
 To update EQ Triage, quit it, download the [latest release](https://github.com/CopperGlade/EQTriage/releases/latest) and extract it over the old folder. Only `EQTriage.exe` is replaced; your `.json` files are kept. To uninstall, delete the folder.
 
