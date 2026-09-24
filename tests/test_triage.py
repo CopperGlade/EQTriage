@@ -611,7 +611,7 @@ def test_saved_values_are_clamped_and_bad_types_ignored(tmp_path):
     }))
     settings = triage.load_settings()
     assert settings['font_size'] == 20 and settings['width'] == 28 and settings['opacity'] == 0
-    assert settings['rows'] == 10 and settings['drop_rate'] == triage.DROP_RATE_RANGE[0]
+    assert settings['rows'] == 8 and settings['drop_rate'] == triage.DROP_RATE_RANGE[0]
     assert settings['hidden_groups'] == [1, 3] and settings['locked'] is False
     assert settings['thresholds']['Warrior'] == {'list': 30, 'red': 30}
     assert settings['sound_choice']['death'] == 'low_gong' and settings['sound_choice']['low'] == 'bell'
@@ -801,9 +801,9 @@ def test_restore_defaults_works_before_any_configure_window_opened(qapp, setting
     settings['target_show_header'] = False
     control = make_control(settings)
     control.apply_defaults()
-    assert settings['target_font_size'] == 10 and settings['rows'] == 10
+    assert settings['target_font_size'] == 10 and settings['rows'] == 8
     assert settings['target_show_header'] is True and settings['target_window'] is True
-    assert control.overlay.height() == triage.HEADER_HEIGHT + 10 * control.overlay.row_height + triage.ROW_GAP
+    assert control.overlay.height() == triage.HEADER_HEIGHT + 8 * control.overlay.row_height + triage.ROW_GAP
 
 
 def test_restore_defaults_also_resets_positions_locks_and_pins(qapp, settings, tmp_path):

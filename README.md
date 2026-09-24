@@ -19,7 +19,7 @@ EQ Triage sits on top of EverQuest and lists the people who need attention: play
 
 ## Reading the overlay
 
-The overlay has 10 rows by default (adjustable from 3 to 25 in the Overlay settings). Rows appear in this order:
+The overlay has 8 rows by default (adjustable from 3 to 25 under **Other settings** in the *Triage overlay* section). Rows appear in this order:
 
 1. **Pinned players**, in the order you pinned them.
 2. **Charmer alerts** (`CHARMER HIT`, then `CHARM BREAK`).
@@ -158,7 +158,7 @@ The sections run top to bottom: *Triage overlay*, *Alerts* and *Pinned players*,
 | Text size | 10 pt | Text size of the rows. The overlay resizes to match. |
 | Overlay width | 28 characters | How wide the overlay is, counted in characters of text so it grows with the text size. Widen it if long names get shortened with …. |
 | Background opacity | 70% | How visible the overlay's frame is, from 0% (fully clear) to 100% (solid): the dark background, the outer border and the lines between rows. The text, alert colors, pins, the *Triage* header and the bottom edge always stay fully visible, so at 0% you see just the rows between the header and a thin bottom line. Untick **Show header bar** to drop the header and bottom edge too. |
-| Number of rows | 10 | How many rows the overlay has, from 3 to 25. The overlay grows or shrinks to match. |
+| Number of rows | 8 | How many rows the overlay has, from 3 to 25. The overlay grows or shrinks to match. |
 
 **Distance overlay**: the second overlay, see [Target distance window](#target-distance-window). Show window, Re-center, Lock position, Show header bar and its own Preview sit in the section itself; the last four settings are behind **Other settings**.
 

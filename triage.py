@@ -171,7 +171,7 @@ SETTINGS = {
     # The frame: background, outer border and row dividers. Text, alert colors, pins, the header strip and the
     # bottom edge always stay as they are, and the header's fixed backing keeps it grabbable at 0%.
     'opacity': (70, 0, 100, 'Background opacity', '%'),
-    'rows': (10, 3, MAX_PINS, 'Number of rows', ' rows'),
+    'rows': (8, 3, MAX_PINS, 'Number of rows', ' rows'),
     # The Distance overlay's colors: white up to the near cutoff (the main heals' 100 range), yellow up to the far
     # one (Remedy's 200), red beyond. Near can't exceed far.
     'target_near': (100, 10, 1000, 'Display yellow farther than', ' units'),
