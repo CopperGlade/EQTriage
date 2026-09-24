@@ -1380,7 +1380,7 @@ class ControlWindow(QWidget):
         preview_button.clicked.connect(self.preview)
         self.visibility_button = QPushButton()
         self.visibility_button.clicked.connect(self.toggle_overlay)
-        reset_button = QPushButton('Recenter')
+        reset_button = QPushButton('Re-center')
         reset_button.setToolTip('Move the overlay back to the top center of the screen, e.g. if it is off-screen.')
         reset_button.clicked.connect(overlay.reset_position)
         lock_box = QCheckBox('Lock position')

@@ -118,7 +118,7 @@ The **EQ Triage window** opens on the desktop where you started EQ Triage and ha
 - **Move:** drag the *Triage* header of the overlay.
 - **Preview:** under *Overlay*, fills the overlay with one of each row type for 10 seconds, so you can check its size, width and position without waiting for someone to get hurt.
 - **Hide / Show:** under *Overlay*, hides the overlay without quitting, for example while trading or AFK. Sounds keep playing while it's hidden.
-- **Recenter:** under *Overlay*, moves the overlay back to the top center of the screen if it ever ends up off-screen. It works even when the position is locked. EQ Triage also recenters on its own at startup when the saved position is on no screen, for example after unplugging a monitor.
+- **Re-center:** under *Overlay*, moves the overlay back to the top center of the screen if it ever ends up off-screen. It works even when the position is locked. EQ Triage also re-centers on its own at startup when the saved position is on no screen, for example after unplugging a monitor.
 - **Lock position:** under *Overlay*, stops the header from being dragged. While locked, clicks on the header go straight through to the game like the rest of the overlay; the pins still work. The lock is remembered between sessions.
 - **Pin / unpin:** click the pin at the right of a player row, or use *Pinned players* in the EQ Triage window.
 - **This page:** click **Read the docs**.
@@ -219,7 +219,7 @@ Start with the status line at the top of the EQ Triage window. It checks the con
 | 🟢 Receiving data from Sebik. | Everything is working. Every connected character is listed by name; if one of your boxes is missing, its EverQuest window isn't connected yet. |
 
 - **Overlay is empty while the status is green:** that's normal when nobody is hurt. Click **Preview** to check it's on screen, or set **All classes** to warning below 100% under **Health thresholds…** for a moment to see real data flowing.
-- **Can't see the overlay at all:** check it isn't hidden (the button under *Overlay* says **Show**), then click **Recenter**.
+- **Can't see the overlay at all:** check it isn't hidden (the button under *Overlay* says **Show**), then click **Re-center**.
 - **Can't drag the overlay:** untick **Lock position** under *Overlay*.
 - **Rows blink on and off:** EQ Triage treats data older than 2 seconds as gone. If you raised Zeal's `/pipedelay` above about 1500 ms, set it back down (the default is 100).
 - **Something else is wrong:** look at `triage.log` in the EQ Triage folder; the last lines usually say what happened.
