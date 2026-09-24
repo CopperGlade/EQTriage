@@ -56,17 +56,15 @@ Someone dropping fast is sorted by where they will be in a couple of seconds at 
 
 ### Raid focus
 
-In a raid, the **Watch** setting in the Alerts section decides whose alerts show:
+In a raid, the **Scope** setting in the Alerts section decides whose alerts show. By default it's **Entire raid**, so everyone shows. Click it to select the groups you want to monitor. All 12 are selected to begin with, so untick any you don't need, for example groups another healer covers. The setting then reads e.g. *All but groups 7, 8*.
 
-- **Whole raid** (default): everyone.
-- **My group**: only your own raid group. It follows the character in the active EverQuest window, so it switches with you between boxes.
-- **Chosen groups…**: pick any of the 12 raid groups, for example the tank groups you're assigned to heal. The setting then shows the chosen groups, e.g. *Groups 1, 3*. Pick it again to change them.
+Your own raid group always shows, even when its number is unticked. It's the group of the character in the active EverQuest window, so it switches with you between boxes, and you keep your group's alerts if the raid leader moves you into a group you hid. Untick every group to monitor only your own (*Your group only*).
 
-Pinned players always show, whatever the setting. Outside a raid nothing is filtered, and anyone EQ Triage has no raid group for yet is shown rather than hidden.
+Pinned players always show, whatever the setting, and so do ungrouped raid members and anyone EQ Triage has no raid group for yet. Nothing is hidden outside a raid, or until EQ Triage knows your own group.
 
 ### Charm breaks
 
-When a group member's pet health bar disappears while the pet still had more than 10% health, EQ Triage reports `CHARM BREAK name`. A bar that vanishes at low health counts as the pet dying and is ignored. This works for your group only, not the whole raid.
+When a group member's pet health bar disappears while the pet still had more than 10% health, EQ Triage reports `CHARM BREAK name`. A bar that vanishes at low health counts as the pet dying and is ignored. This works for your group only, not the entire raid.
 
 To avoid false alarms, a lost pet only counts as a charm break when:
 
@@ -181,7 +179,7 @@ The list is sorted by how close each person is to their own critical level, so a
 
 | Setting | Default | What it does |
 |---|---|---|
-| Watch | Whole raid | In a raid, whose alerts show: the whole raid, only your group, or chosen raid groups. See [Raid focus](#raid-focus). |
+| Scope | Entire raid | In a raid, which raid groups' alerts show. Untick groups to hide them; your own group always shows. See [Raid focus](#raid-focus). |
 | Distance warning beyond | On, 70 units | Listed players farther away than this show their distance, e.g. `(150 away)`. Untick it to turn distance warnings off. |
 
 Click **Preview** while you adjust the Overlay settings to see the effect. **Restore defaults**, at the bottom of the window, puts every setting back to its default, including the alert types, sounds and class thresholds; it doesn't touch your pinned players, the overlay's position or the lock.

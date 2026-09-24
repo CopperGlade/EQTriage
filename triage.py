@@ -104,14 +104,9 @@ DROP_HOLD_SECONDS = 1.5
 DROP_PROJECT_SECONDS = 2.0
 DEFAULT_DROP_RATE = 10
 DROP_RATE_RANGE = (3, 50)
-# Watch setting: every raid member, only the active character's raid group, or chosen raid groups.
-FOCUS_ALL = 'all'
-FOCUS_MINE = 'mine'
-FOCUS_GROUPS = 'groups'
+# Scope setting: the entire raid shows unless raid groups are unticked; the active character's own group always shows.
 RAID_GROUPS = 12
 RAID_GROUP_COLUMNS = 4
-FOCUS_GROUPS_TEXT = 'Chosen groups\u2026'
-FOCUS_CHOICES = (('Whole raid', FOCUS_ALL), ('My group', FOCUS_MINE), (FOCUS_GROUPS_TEXT, FOCUS_GROUPS))
 # Pins are capped at the most rows the overlay can show; with fewer rows set, only the first pins fit.
 MAX_PINS = 25
 DEFAULT_Y = 150
@@ -600,22 +595,18 @@ def snapshot(settings, now):
 
 
 def focus_filter(settings, origin, now):
-    # Which players the Watch setting keeps: None keeps everyone. Raid groups only exist in a raid, so outside one
-    # nothing is filtered, and a player without raid data (e.g. only in your group) is always kept. Needs state_lock.
-    if settings['focus'] == FOCUS_ALL:
+    # Which players the Scope setting keeps: None keeps everyone. Only the unticked raid groups are hidden, so a
+    # player without raid data (e.g. only in your group) or an ungrouped raid member is always kept. Your own raid
+    # group, that of the character in the active EQ window, always shows, so it follows you between boxes; outside
+    # a raid, or until your own group is known, nothing is hidden. Needs state_lock.
+    if not settings['hidden_groups']:
         return None
     groups = {name: group for name, (group, seen) in raid_groups.items() if now - seen < STALE_SECONDS}
-    if not groups:
+    mine = groups.get(pipe_characters.get(origin))
+    if mine is None:
         return None
-    if settings['focus'] == FOCUS_MINE:
-        # Your raid group is that of the character in the active EQ window, so it follows you between boxes.
-        mine = groups.get(pipe_characters.get(origin))
-        if mine is None:
-            return None
-        wanted = {mine}
-    else:
-        wanted = {str(group) for group in settings['focus_groups']}
-    return lambda name: name not in groups or groups[name] in wanted
+    hidden = {str(group) for group in settings['hidden_groups']} - {mine}
+    return lambda name: groups.get(name) not in hidden
 
 
 def apply_focus(keep, dead, charmers_hit, breaks, low, low_pets):
@@ -641,7 +632,7 @@ def alert_rows(settings, pinned, origin=None):
         far = {name: d for name, d in distances.items() if d is not None and d > settings['range']}
         hp, member_limits, dead, charmers_hit, breaks, low, low_pets, dropping = snapshot(settings, now)
         keep = focus_filter(settings, origin, now)
-    # Pinned players are shown whatever the Watch setting; everything else follows it.
+    # Pinned players are shown whatever the Scope setting; everything else follows it.
     dead, charmers_hit, breaks, low, low_pets = apply_focus(keep, dead, charmers_hit, breaks, low, low_pets)
     # Each row is (prefix, name, suffix, color, pin key). Only the name is shortened when a row is too wide,
     # and the pin key is the player a click on the row's pin toggles (None for pets and empty rows).
@@ -902,11 +893,8 @@ def load_settings():
     rate = saved.get('drop_rate')
     valid = isinstance(rate, (int, float)) and not isinstance(rate, bool)
     settings['drop_rate'] = min(max(int(rate), DROP_RATE_RANGE[0]), DROP_RATE_RANGE[1]) if valid else DEFAULT_DROP_RATE
-    settings['focus'] = saved.get('focus') if saved.get('focus') in (FOCUS_ALL, FOCUS_MINE, FOCUS_GROUPS) else FOCUS_ALL
-    groups = saved.get('focus_groups') if isinstance(saved.get('focus_groups'), list) else []
-    settings['focus_groups'] = sorted({g for g in groups if isinstance(g, int) and 1 <= g <= RAID_GROUPS})
-    if settings['focus'] == FOCUS_GROUPS and not settings['focus_groups']:
-        settings['focus'] = FOCUS_ALL
+    groups = saved.get('hidden_groups') if isinstance(saved.get('hidden_groups'), list) else []
+    settings['hidden_groups'] = sorted({g for g in groups if isinstance(g, int) and 1 <= g <= RAID_GROUPS})
     settings.update(event_defaults(saved))
     return settings
 
@@ -1252,6 +1240,20 @@ def open_docs():
     QDesktopServices.openUrl(QUrl(DOCS_URL))
 
 
+def scope_text(hidden):
+    # What the Scope button reads. Your own group always shows, so hiding most groups names the ones left instead.
+    def listing(groups):
+        return f'{"groups" if len(groups) > 1 else "group"} {", ".join(map(str, groups))}'
+    if not hidden:
+        return 'Entire raid'
+    shown = [group for group in range(1, RAID_GROUPS + 1) if group not in hidden]
+    if not shown:
+        return 'Your group only'
+    if len(hidden) > RAID_GROUPS // 2:
+        return f'{listing(shown).capitalize()} and your own'
+    return f'All but {listing(hidden)}'
+
+
 class ControlWindow(QWidget):
     # The normal window that owns the taskbar button and stays on the desktop EQ Triage was started on.
     # It holds the settings and pins; closing it quits the app.
@@ -1311,16 +1313,16 @@ class ControlWindow(QWidget):
         alerts_buttons = QHBoxLayout()
         alerts_buttons.addWidget(alert_types_button)
         alerts_buttons.addWidget(thresholds_button)
+        self.scope_button = QPushButton()
+        self.scope_button.setToolTip('In a raid, select the groups you want to monitor. Your own group (the character '
+                                     'in the active EQ window) and pinned players are always monitored.')
+        self.scope_button.clicked.connect(self.pick_groups)
+        self.show_scope()
+        # The Scope row spans the box, since its text can list several groups.
+        scope_row = QHBoxLayout()
+        scope_row.addWidget(QLabel('Scope'))
+        scope_row.addWidget(self.scope_button, 1)
         alerts_form = QFormLayout()
-        self.focus_picker = QComboBox()
-        for text, focus in FOCUS_CHOICES:
-            self.focus_picker.addItem(text, focus)
-        self.focus_picker.setToolTip('In a raid, list everyone, only your own raid group (the character in the active '
-                                     'EQ window), or chosen raid groups. Pinned players always show.')
-        # "activated" also fires when the already-selected item is picked again, so chosen groups can be re-edited.
-        self.focus_picker.activated.connect(self.pick_focus)
-        alerts_form.addRow('Watch', self.focus_picker)
-        self.show_focus()
         self.distance_box = QCheckBox(SETTINGS['range'][3])
         self.distance_box.setToolTip('Show how far away listed players are when they are farther than this, '
                                      'e.g. (150 away), or (other zone).')
@@ -1330,6 +1332,7 @@ class ControlWindow(QWidget):
         self.spins['range'].setEnabled(overlay.settings['distance_warning'])
         alerts_layout = QVBoxLayout(alerts_box)
         alerts_layout.addLayout(alerts_buttons)
+        alerts_layout.addLayout(scope_row)
         alerts_layout.addLayout(alerts_form)
         self.dialogs = {}
 
@@ -1402,26 +1405,15 @@ class ControlWindow(QWidget):
         self.spins[key] = spin
         return spin
 
-    def pick_focus(self):
-        settings = self.overlay.settings
-        focus = self.focus_picker.currentData()
-        if focus == FOCUS_GROUPS:
-            chooser = RaidGroupsDialog(self, settings['focus_groups'])
-            if not chooser.exec() or not chooser.chosen():
-                # Cancelled, or no group ticked: keep the previous choice.
-                self.show_focus()
-                return
-            settings['focus_groups'] = chooser.chosen()
-        settings['focus'] = focus
-        self.save_and_redraw()
-        self.show_focus()
+    def pick_groups(self):
+        chooser = RaidGroupsDialog(self, self.overlay.settings['hidden_groups'])
+        if chooser.exec():
+            self.overlay.settings['hidden_groups'] = chooser.hidden()
+            self.save_and_redraw()
+            self.show_scope()
 
-    def show_focus(self):
-        settings = self.overlay.settings
-        index = self.focus_picker.findData(FOCUS_GROUPS)
-        groups = settings['focus_groups']
-        self.focus_picker.setItemText(index, f'Groups {", ".join(map(str, groups))}' if groups else FOCUS_GROUPS_TEXT)
-        self.focus_picker.setCurrentIndex(self.focus_picker.findData(settings['focus']))
+    def show_scope(self):
+        self.scope_button.setText(scope_text(self.overlay.settings['hidden_groups']))
 
     def set_distance_warning(self, enabled):
         self.overlay.settings['distance_warning'] = enabled
@@ -1451,10 +1443,9 @@ class ControlWindow(QWidget):
         self.overlay.settings['thresholds'] = default_thresholds()
         self.overlay.settings.update(event_defaults({}))
         self.distance_box.setChecked(True)
-        self.overlay.settings['focus'] = FOCUS_ALL
-        self.overlay.settings['focus_groups'] = []
+        self.overlay.settings['hidden_groups'] = []
         self.overlay.settings['drop_rate'] = DEFAULT_DROP_RATE
-        self.show_focus()
+        self.show_scope()
         self.save_and_redraw()
         for dialog in self.dialogs.values():
             dialog.load()
@@ -1510,15 +1501,16 @@ class ControlWindow(QWidget):
 
 
 class RaidGroupsDialog(QDialog):
-    # Tick the raid groups to watch. Only used while choosing, so it asks and returns rather than saving live.
-    def __init__(self, parent, chosen):
+    # Untick the raid groups to hide; all are ticked by default. Only used while choosing, so it asks and returns
+    # rather than saving live.
+    def __init__(self, parent, hidden):
         super().__init__(parent)
-        self.setWindowTitle(f'{APP_NAME}: raid groups to watch')
+        self.setWindowTitle(f'{APP_NAME}: raid groups to monitor')
         self.boxes = []
         grid = QGridLayout()
         for number in range(1, RAID_GROUPS + 1):
             box = QCheckBox(f'Group {number}')
-            box.setChecked(number in chosen)
+            box.setChecked(number not in hidden)
             grid.addWidget(box, (number - 1) // RAID_GROUP_COLUMNS, (number - 1) % RAID_GROUP_COLUMNS)
             self.boxes.append(box)
         ok_button = QPushButton('OK')
@@ -1531,12 +1523,12 @@ class RaidGroupsDialog(QDialog):
         buttons.addWidget(ok_button)
         buttons.addWidget(cancel_button)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel('Show players from these raid groups. Pinned players always show.'))
+        layout.addWidget(QLabel('Select the groups you want to monitor.\nYour own group is always monitored.'))
         layout.addLayout(grid)
         layout.addLayout(buttons)
 
-    def chosen(self):
-        return [number for number, box in enumerate(self.boxes, start=1) if box.isChecked()]
+    def hidden(self):
+        return [number for number, box in enumerate(self.boxes, start=1) if not box.isChecked()]
 
 
 class AlertTypesDialog(QDialog):
