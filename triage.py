@@ -167,7 +167,7 @@ SETTINGS = {
     'range': (70, 10, 1000, 'Show distance beyond', ' units'),
     'font_size': (10, 7, 20, 'Text size', ' pt'),
     # Counted in characters rather than pixels, so the overlay widens with the text size and names keep fitting.
-    'width': (26, 12, 40, 'Overlay width', ' characters'),
+    'width': (28, 12, 40, 'Overlay width', ' characters'),
     # The frame: background, outer border and row dividers. Text, alert colors, pins, the header strip and the
     # bottom edge always stay as they are, and the header's fixed backing keeps it grabbable at 0%.
     'opacity': (70, 0, 100, 'Background opacity', '%'),

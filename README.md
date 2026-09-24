@@ -156,7 +156,7 @@ The sections run top to bottom: *Triage overlay*, *Alerts* and *Pinned players*,
 | Setting | Default | What it does |
 |---|---|---|
 | Text size | 10 pt | Text size of the rows. The overlay resizes to match. |
-| Overlay width | 26 characters | How wide the overlay is, counted in characters of text so it grows with the text size. Widen it if long names get shortened with …. |
+| Overlay width | 28 characters | How wide the overlay is, counted in characters of text so it grows with the text size. Widen it if long names get shortened with …. |
 | Background opacity | 70% | How visible the overlay's frame is, from 0% (fully clear) to 100% (solid): the dark background, the outer border and the lines between rows. The text, alert colors, pins, the *Triage* header and the bottom edge always stay fully visible, so at 0% you see just the rows between the header and a thin bottom line. Untick **Show header bar** to drop the header and bottom edge too. |
 | Number of rows | 10 | How many rows the overlay has, from 3 to 25. The overlay grows or shrinks to match. |
 

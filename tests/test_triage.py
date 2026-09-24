@@ -610,7 +610,7 @@ def test_saved_values_are_clamped_and_bad_types_ignored(tmp_path):
         'custom_sounds': {'charm_break': 7},
     }))
     settings = triage.load_settings()
-    assert settings['font_size'] == 20 and settings['width'] == 26 and settings['opacity'] == 0
+    assert settings['font_size'] == 20 and settings['width'] == 28 and settings['opacity'] == 0
     assert settings['rows'] == 10 and settings['drop_rate'] == triage.DROP_RATE_RANGE[0]
     assert settings['hidden_groups'] == [1, 3] and settings['locked'] is False
     assert settings['thresholds']['Warrior'] == {'list': 30, 'red': 30}
