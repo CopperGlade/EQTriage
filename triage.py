@@ -30,7 +30,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QGridLayout, QGroupBox,
-    QHBoxLayout, QLabel, QListWidget, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QListWidget, QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
 APP_NAME = 'EQ Triage'
@@ -91,7 +91,7 @@ PINNED_COLOR = '#e8e8e8'
 STALE_COLOR = '#8a8a8a'
 EMPTY_ROW = ('', '', '', LOW_HP_COLOR, None)
 VERBOSE_ROW = ('Type ', '/pipeverbose on', '', STALE_COLOR, None)
-PREVIEW_SECONDS = 10.0
+PREVIEW_SECONDS = 15.0
 # One of each row type, so text size, width and position can be judged before any real data arrives.
 SAMPLE_ROWS = [
     ('', 'Sebik', ' 95%', PINNED_COLOR, None),
@@ -120,6 +120,18 @@ RAID_GROUP_COLUMNS = 4
 # Pins are capped at the most rows the overlay can show; with fewer rows set, only the first pins fit.
 MAX_PINS = 25
 DEFAULT_Y = 150
+# The Distance overlay: a second one-row overlay with just the distance to the selected target, meant to sit next
+# to EverQuest's own target window, which already shows the name. The distance is only known for group and raid
+# members, the only other players whose position the pipe carries.
+TARGET_TITLE = 'Distance'
+# Its own width in characters: "1234 away" or "Out of zone" needs far less room than the main overlay's rows, but
+# some air around it reads better than a box hugging the text (never narrower than the title either, see apply_font).
+TARGET_WIDTH = 13
+TARGET_POSITION_KEY = 'target'
+TARGET_DEFAULT_Y = 90
+TARGET_SAMPLE_ROW = ('', '45 away', '', PINNED_COLOR, None)
+NO_DISTANCE_ROW = ('', '--', '', STALE_COLOR, None)
+OUT_OF_ZONE_ROW = ('', 'Out of zone', '', CRITICAL_HP_COLOR, None)
 FONT_FAMILY = 'Segoe UI'
 TITLE_POINT_SIZE = 8
 HEADER_HEIGHT = 20
@@ -152,7 +164,7 @@ SETTINGS_FILE = os.path.join(APP_DIR, 'settings.json')
 # Setting key -> (default, minimum, maximum, label in the control window, suffix shown after the value).
 SETTINGS = {
     # Listed players farther away than this get their distance shown, e.g. (150 away), when warnings are on.
-    'range': (70, 10, 1000, 'Distance warning beyond', ' units'),
+    'range': (70, 10, 1000, 'Show distance beyond', ' units'),
     'font_size': (10, 7, 20, 'Text size', ' pt'),
     # Counted in characters rather than pixels, so the overlay widens with the text size and names keep fitting.
     'width': (26, 12, 40, 'Overlay width', ' characters'),
@@ -160,10 +172,23 @@ SETTINGS = {
     # bottom edge always stay as they are, and the header's fixed backing keeps it grabbable at 0%.
     'opacity': (70, 0, 100, 'Background opacity', '%'),
     'rows': (10, 3, MAX_PINS, 'Number of rows', ' rows'),
+    # The Distance overlay's colors: white up to the near cutoff (the main heals' 100 range), yellow up to the far
+    # one (Remedy's 200), red beyond. Near can't exceed far.
+    'target_near': (100, 10, 1000, 'Display yellow farther than', ' units'),
+    'target_far': (200, 10, 1000, 'Display red farther than', ' units'),
+    # The Distance overlay's own look: it sits elsewhere on the screen and shows one number, so it is tuned apart.
+    'target_font_size': (10, 7, 20, 'Text size', ' pt'),
+    'target_opacity': (70, 0, 100, 'Background opacity', '%'),
 }
-# How the EQ Triage window groups them: what the overlay looks like, and what gets listed on it.
+# How the EQ Triage window groups them: the Triage overlay's look, what gets listed on it, and the Distance overlay.
 OVERLAY_SETTINGS = ('font_size', 'width', 'opacity', 'rows')
 ALERT_SETTINGS = ('range',)
+DISTANCE_SETTINGS = ('target_font_size', 'target_opacity', 'target_near', 'target_far')
+SETTING_TOOLTIPS = {
+    'target_near': 'The distance is white up to here and yellow beyond: the range of Complete Healing and the other '
+                   'main heals is 100.',
+    'target_far': 'The distance is red beyond here: Remedy reaches 200.',
+}
 # EverQuest's class numbers as Zeal reports them.
 CLASSES = {
     1: 'Warrior', 2: 'Cleric', 3: 'Paladin', 4: 'Ranger', 5: 'Shadow Knight', 6: 'Druid', 7: 'Monk', 8: 'Bard',
@@ -252,6 +277,9 @@ raid_groups = {}
 connected = set()
 pipe_characters = {}
 member_messages = {}
+# Per client: the selected target's spawn id, and each group or raid member's spawn id.
+targets = {}
+member_spawns = {}
 eq_started = None
 verbose_missing = False
 newer_release = None
@@ -269,9 +297,12 @@ def location(loc):
 
 
 def handle_player(data, pipe_name):
-    if 'location' in data:
-        with state_lock:
-            own_locations[pipe_name] = (location(data['location']), time.monotonic())
+    now = time.monotonic()
+    with state_lock:
+        if 'location' in data:
+            own_locations[pipe_name] = (location(data['location']), now)
+        # Zeal only includes target_id while something is targeted.
+        targets[pipe_name] = (data.get('target_id'), now)
 
 
 def handle_members(entries, pipe_name):
@@ -285,6 +316,8 @@ def handle_members(entries, pipe_name):
             # A member only has a location while in the reporting client's zone, so it is kept per client.
             if 'loc' in entry:
                 member_locations[(pipe_name, entry['name'])] = (location(entry['loc']), now)
+            if 'spawn_id' in entry:
+                member_spawns[(pipe_name, entry['name'])] = (entry['spawn_id'], now)
             if entry.get('class') in CLASSES:
                 member_classes[entry['name']] = entry['class']
             # Only raid entries carry a group: its number as text ("1" to "12"), or "0" when ungrouped.
@@ -628,6 +661,32 @@ def with_distance(row, distance):
     return prefix, name, f'{suffix} ({rounded} away)', color, key
 
 
+def target_row(settings, origin, now):
+    # The Distance overlay's one row for the active client's selected target: "450 away" when the target is a group
+    # or raid member, colored by the target_near/target_far cutoffs (white, yellow, red), or "Out of zone" in red
+    # when that member has no position in your zone. Anything else (a mob, a pet, a player outside the group and
+    # raid) has no position in the feed, so it shows "--", as does a member while your own position is unknown.
+    # No target means an empty row. Needs state_lock.
+    spawn = targets.get(origin)
+    if not spawn or now - spawn[1] >= STALE_SECONDS or spawn[0] is None:
+        return EMPTY_ROW
+    target_id = spawn[0]
+    member = next((name for (pipe, name), (spawn_id, seen) in member_spawns.items()
+                   if pipe == origin and spawn_id == target_id and now - seen < STALE_SECONDS), None)
+    distance = distance_to(member, origin, now) if member else None
+    if distance is None:
+        return NO_DISTANCE_ROW
+    if distance == math.inf:
+        return OUT_OF_ZONE_ROW
+    if distance <= settings['target_near']:
+        color = PINNED_COLOR
+    elif distance <= settings['target_far']:
+        color = LOW_HP_COLOR
+    else:
+        color = CRITICAL_HP_COLOR
+    return ('', f'{int(distance)} away', '', color, None)
+
+
 def snapshot(settings, now):
     # What the overlay and the sounds both work from, with switched-off event types left out. Needs state_lock.
     show = settings['show']
@@ -943,16 +1002,25 @@ def save_json(path, data):
         log.warning(f'could not save {os.path.basename(path)}: {error}')
 
 
-def load_position():
+def load_position(key=None):
+    # position.json holds the main overlay's x and y at the top level, and each other window's under its own key.
     position = load_json(POSITION_FILE)
+    if key:
+        position = position.get(key) if isinstance(position, dict) else None
     try:
         return int(position['x']), int(position['y'])
     except (KeyError, TypeError, ValueError):
         return None
 
 
-def save_position(x, y):
-    save_json(POSITION_FILE, {'x': x, 'y': y})
+def save_position(x, y, key=None):
+    saved = load_json(POSITION_FILE)
+    saved = saved if isinstance(saved, dict) else {}
+    if key:
+        saved[key] = {'x': x, 'y': y}
+    else:
+        saved.update(x=x, y=y)
+    save_json(POSITION_FILE, saved)
 
 
 def load_pins():
@@ -970,9 +1038,14 @@ def load_settings():
         value = saved.get(key)
         valid = isinstance(value, (int, float)) and not isinstance(value, bool)
         settings[key] = min(max(int(value), minimum), maximum) if valid else default
+    settings['target_near'] = min(settings['target_near'], settings['target_far'])
     settings['thresholds'] = load_thresholds(saved)
     settings['locked'] = saved.get('locked') is True
-    settings['rows_only'] = saved.get('rows_only') is True
+    settings['target_locked'] = saved.get('target_locked') is True
+    settings['show_header'] = saved.get('show_header') is not False
+    settings['target_show_header'] = saved.get('target_show_header') is not False
+    settings['target_window'] = saved.get('target_window') is not False
+    settings['triage_window'] = saved.get('triage_window') is not False
     settings['distance_warning'] = saved.get('distance_warning') is not False
     rate = saved.get('drop_rate')
     valid = isinstance(rate, (int, float)) and not isinstance(rate, bool)
@@ -1039,6 +1112,15 @@ def faded(color, opacity):
 
 
 class TriageWindow(QWidget):
+    # The main overlay. TargetWindow subclasses it for the one-row target window, overriding the class attributes
+    # and the row hooks (row_count, poll, sample_rows, live_rows), so both share the look, drag, lock, header
+    # setting and text size.
+    TITLE = 'Triage'
+    POSITION_KEY = None
+    DEFAULT_TOP = DEFAULT_Y
+    HAS_SOUNDS = True
+    HAS_PINS = True
+
     def __init__(self, settings):
         # A tool window, like NAG's overlays: Windows leaves it out of virtual desktops, so it floats over EQ
         # on every desktop. The taskbar button belongs to ControlWindow instead.
@@ -1050,9 +1132,9 @@ class TriageWindow(QWidget):
         self.settings = settings
         self.origin = None
         self.preview_until = 0.0
-        self.sounds = SoundAlerts(settings)
+        self.sounds = SoundAlerts(settings) if self.HAS_SOUNDS else None
         self.pinned = load_pins()
-        self.rows = [EMPTY_ROW] * settings['rows']
+        self.rows = [EMPTY_ROW] * self.row_count()
         self.title_font = QFont(FONT_FAMILY, TITLE_POINT_SIZE, QFont.Bold)
         self.apply_font()
         self.drag_offset = None
@@ -1062,23 +1144,47 @@ class TriageWindow(QWidget):
         self.timer.timeout.connect(self.refresh)
 
     def apply_font(self):
-        self.row_font = QFont(FONT_FAMILY, self.settings['font_size'], QFont.DemiBold)
+        self.row_font = QFont(FONT_FAMILY, self.font_size(), QFont.DemiBold)
         self.metrics = QFontMetrics(self.row_font)
         self.row_height = self.metrics.height() + ROW_GAP
-        self.text_width = self.metrics.horizontalAdvance('0') * self.settings['width']
+        # Never narrower than the title, so a small text size can't clip the header.
+        self.text_width = max(self.metrics.horizontalAdvance('0') * self.width_chars(),
+                              QFontMetrics(self.title_font).horizontalAdvance(self.TITLE))
         self.pin_left = PADDING + self.text_width
         self.setFixedSize(
-            self.pin_left + PIN_WIDTH + PADDING, HEADER_HEIGHT + self.settings['rows'] * self.row_height + ROW_GAP
+            self.pin_left + self.pin_width() + PADDING, HEADER_HEIGHT + self.row_count() * self.row_height + ROW_GAP
         )
         self.update()
 
+    def row_count(self):
+        return self.settings['rows']
+
+    def width_chars(self):
+        return self.settings['width']
+
+    # Each overlay has its own look settings; these say which keys this one reads.
+    def font_size(self):
+        return self.settings['font_size']
+
+    def opacity(self):
+        return self.settings['opacity']
+
+    def header_shown(self):
+        return self.settings['show_header']
+
+    def locked(self):
+        return self.settings['locked']
+
+    def pin_width(self):
+        return PIN_WIDTH if self.HAS_PINS else 0
+
     def default_position(self):
         screen = QApplication.primaryScreen().availableGeometry()
-        return screen.x() + (screen.width() - self.width()) // 2, screen.y() + DEFAULT_Y
+        return screen.x() + (screen.width() - self.width()) // 2, screen.y() + self.DEFAULT_TOP
 
     def reset_position(self):
         self.move(*self.default_position())
-        save_position(self.x(), self.y())
+        save_position(self.x(), self.y(), self.POSITION_KEY)
 
     def on_screen(self, x, y):
         # A position saved with a monitor that is no longer there would put the overlay where nobody can see it.
@@ -1113,18 +1219,22 @@ class TriageWindow(QWidget):
             ctypes.windll.user32.SetForegroundWindow(ctypes.c_void_p(self.previous_foreground))
         self.previous_foreground = None
 
-    def refresh(self):
+    def poll(self):
+        # Per-refresh work besides the rows: the dropping-fast timers and the sounds.
         update_dropping(self.settings)
-        rows = self.current_rows()
         if not self.previewing():
             self.sounds.update(self.settings, current_events(self.settings, self.active_pipe()))
+
+    def refresh(self):
+        self.poll()
+        rows = self.current_rows()
         cursor = self.mapFromGlobal(QCursor.pos())
         if rows != self.rows:
             self.rows = rows
             self.update()
         over_pin = self.pin_key_at(cursor) is not None
-        # A locked overlay, or one showing rows only, has no drag area, so its header band lets clicks through.
-        over_header = (self.frame_shown() and not self.settings['locked'] and self.rect().contains(cursor)
+        # A locked overlay, or one with its header bar hidden, has no drag area, so its header band lets clicks through.
+        over_header = (self.frame_shown() and not self.locked() and self.rect().contains(cursor)
                        and cursor.y() < HEADER_HEIGHT)
         self.setCursor(Qt.PointingHandCursor if over_pin else Qt.SizeAllCursor)
         self.set_passthrough(self.drag_offset is None and not over_header and not over_pin)
@@ -1152,17 +1262,23 @@ class TriageWindow(QWidget):
 
     def current_rows(self):
         if self.previewing():
-            return padded(SAMPLE_ROWS, self.settings['rows'])
+            return padded(self.sample_rows(), self.row_count())
+        return self.live_rows()
+
+    def sample_rows(self):
+        return SAMPLE_ROWS
+
+    def live_rows(self):
         return alert_rows(self.settings, self.pinned, self.active_pipe())
 
     def previewing(self):
         return time.monotonic() < self.preview_until
 
     def frame_shown(self):
-        # Rows only hides the header strip, its title and the bottom edge, leaving just the rows over the game. The
-        # overlay keeps its size, so the rows never move. Preview brings the frame back for its few seconds, since
-        # the header is the only way to drag the overlay into place.
-        return not self.settings['rows_only'] or self.previewing()
+        # Unticking Show header bar hides the header strip, its title and the bottom edge, leaving just the rows over
+        # the game. The overlay keeps its size, so the rows never move. Preview brings the frame back for its few
+        # seconds, since the header is the only way to drag the overlay into place.
+        return self.header_shown() or self.previewing()
 
     def start_preview(self):
         self.preview_until = time.monotonic() + PREVIEW_SECONDS
@@ -1193,7 +1309,7 @@ class TriageWindow(QWidget):
         painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
         width = self.width()
         frame = self.frame_shown()
-        # With rows only, the panel starts below the header band, which stays empty and transparent.
+        # With the header bar hidden, the panel starts below the header band, which stays empty and transparent.
         top = 0 if frame else HEADER_HEIGHT
         panel = QPainterPath()
         panel.addRoundedRect(QRectF(0, top, width, self.height() - top).adjusted(0.5, 0.5, -0.5, -0.5),
@@ -1202,7 +1318,7 @@ class TriageWindow(QWidget):
         # Opacity fades the frame: background, outer border and row dividers. The header strip, its title and the
         # bottom edge keep a fixed look, so the overlay can always be found and dragged by its header, unless rows
         # only hides them.
-        opacity = self.settings['opacity'] / 100
+        opacity = self.opacity() / 100
         painter.save()
         painter.setClipPath(panel)
         if frame:
@@ -1213,7 +1329,7 @@ class TriageWindow(QWidget):
         painter.restore()
 
         painter.setPen(QPen(faded(DIVIDER_COLOR, opacity), 1))
-        for i in range(self.settings['rows']):
+        for i in range(self.row_count()):
             y = HEADER_HEIGHT + i * self.row_height
             painter.drawLine(QPointF(PADDING / 2, y), QPointF(width - PADDING / 2, y))
         painter.setPen(QPen(faded(EDGE_COLOR, opacity), 1))
@@ -1227,7 +1343,7 @@ class TriageWindow(QWidget):
             painter.setPen(HEADER_TEXT_COLOR)
             painter.setFont(self.title_font)
             painter.drawText(header, Qt.AlignVCenter | Qt.AlignLeft,
-                             'Triage (preview)' if self.previewing() else 'Triage')
+                             f'{self.TITLE} (preview)' if self.previewing() else self.TITLE)
 
         painter.setFont(self.row_font)
         for i, (prefix, name, suffix, color, key) in enumerate(self.rows):
@@ -1263,7 +1379,7 @@ class TriageWindow(QWidget):
         key = self.pin_key_at(event.position())
         if key:
             self.toggle_pin(key)
-        elif event.position().y() < HEADER_HEIGHT and not self.settings['locked'] and self.frame_shown():
+        elif event.position().y() < HEADER_HEIGHT and not self.locked() and self.frame_shown():
             self.drag_offset = event.globalPosition().toPoint() - self.pos()
             self.take_focus()
 
@@ -1274,8 +1390,48 @@ class TriageWindow(QWidget):
     def mouseReleaseEvent(self, event):
         if self.drag_offset is not None:
             self.drag_offset = None
-            save_position(self.x(), self.y())
+            save_position(self.x(), self.y(), self.POSITION_KEY)
             self.return_focus()
+
+
+class TargetWindow(TriageWindow):
+    # The second overlay: one row with the selected target's name and, for a group or raid member, the distance.
+    # No pins, no sounds, its own saved position, and it shows only while settings['target_window'] is on.
+    TITLE = TARGET_TITLE
+    POSITION_KEY = TARGET_POSITION_KEY
+    DEFAULT_TOP = TARGET_DEFAULT_Y
+    HAS_SOUNDS = False
+    HAS_PINS = False
+
+    def row_count(self):
+        return 1
+
+    def width_chars(self):
+        return TARGET_WIDTH
+
+    def font_size(self):
+        return self.settings['target_font_size']
+
+    def opacity(self):
+        return self.settings['target_opacity']
+
+    def header_shown(self):
+        return self.settings['target_show_header']
+
+    def locked(self):
+        return self.settings['target_locked']
+
+    def poll(self):
+        pass
+
+    def sample_rows(self):
+        return [TARGET_SAMPLE_ROW]
+
+    def live_rows(self):
+        origin = self.active_pipe()
+        now = time.monotonic()
+        with state_lock:
+            return [target_row(self.settings, origin, now)]
 
 
 def read_app_version():
@@ -1367,9 +1523,10 @@ def scope_text(hidden):
 class ControlWindow(QWidget):
     # The normal window that owns the taskbar button and stays on the desktop EQ Triage was started on.
     # It holds the settings and pins; closing it quits the app.
-    def __init__(self, overlay):
+    def __init__(self, overlay, target):
         super().__init__()
         self.overlay = overlay
+        self.target = target
         self.known_names = []
         self.setWindowTitle(APP_NAME)
         self.setFixedWidth(CONTROL_WIDTH)
@@ -1387,51 +1544,107 @@ class ControlWindow(QWidget):
         self.update_notice.hide()
 
         self.spins = {}
-        overlay_box = QGroupBox('Overlay')
+        self.dialogs = {}
+        # Each overlay box: Show window with its placement buttons, then Lock position and Show header bar, then a
+        # full-width Configure button opening the window with its look settings (OverlayDialog).
+        overlay_box = QGroupBox('Triage overlay')
+        self.triage_box = QCheckBox('Show window')
+        self.triage_box.setToolTip('The list of players who need attention. Untick it to run the Distance overlay '
+                                   'on its own; sounds still play.')
+        self.triage_box.setChecked(overlay.settings['triage_window'])
+        self.triage_box.toggled.connect(self.set_triage_window)
         preview_button = QPushButton('Preview')
         preview_button.setToolTip(
             f'Fill the overlay with sample rows for {PREVIEW_SECONDS:g} seconds to check its size and position.'
         )
-        preview_button.clicked.connect(self.preview)
-        self.visibility_button = QPushButton()
-        self.visibility_button.clicked.connect(self.toggle_overlay)
+        preview_button.clicked.connect(lambda: self.preview(overlay))
         reset_button = QPushButton('Re-center')
         reset_button.setToolTip('Move the overlay back to the top center of the screen, e.g. if it is off-screen.')
         reset_button.clicked.connect(overlay.reset_position)
-        lock_box = QCheckBox('Lock position')
-        lock_box.setToolTip("Stop the overlay's header from being dragged, so a stray click can't move it.")
-        lock_box.setChecked(overlay.settings['locked'])
-        lock_box.toggled.connect(self.set_locked)
-        self.rows_only_box = QCheckBox('Rows only')
-        self.rows_only_box.setToolTip('Show just the rows over the game, without the Triage header or the bottom '
-                                      'edge. Preview shows them again for a moment so you can drag the overlay.')
-        self.rows_only_box.setChecked(overlay.settings['rows_only'])
-        self.rows_only_box.toggled.connect(self.set_rows_only)
+        self.lock_box = QCheckBox('Lock position')
+        self.lock_box.setToolTip("Stop the overlay's header from being dragged, so a stray click can't move it.")
+        self.lock_box.setChecked(overlay.settings['locked'])
+        self.lock_box.toggled.connect(self.set_locked)
+        lock_box = self.lock_box
+        self.show_header_box = QCheckBox('Show header bar')
+        self.show_header_box.setToolTip('Untick to show just the rows over the game, without the Triage header or '
+                                        'the bottom edge. Preview shows them again for a moment so you can drag the '
+                                        'overlay.')
+        self.show_header_box.setChecked(overlay.settings['show_header'])
+        self.show_header_box.toggled.connect(self.set_show_header)
+        configure_button = QPushButton('Other settings')
+        configure_button.setToolTip('Text size, width, background opacity and the number of rows.')
+        configure_button.clicked.connect(
+            lambda: self.open_dialog('triage', lambda: OverlayDialog(self, 'triage overlay', OVERLAY_SETTINGS))
+        )
         overlay_row = QHBoxLayout()
-        overlay_row.addWidget(preview_button)
-        overlay_row.addWidget(self.visibility_button)
+        overlay_row.addWidget(self.triage_box, 1)
         overlay_row.addWidget(reset_button)
         boxes_row = QHBoxLayout()
         boxes_row.addWidget(lock_box)
-        boxes_row.addWidget(self.rows_only_box)
+        boxes_row.addWidget(self.show_header_box)
         boxes_row.addStretch()
-        overlay_form = QFormLayout()
-        self.add_spins(overlay_form, OVERLAY_SETTINGS)
         overlay_layout = QVBoxLayout(overlay_box)
         overlay_layout.addLayout(overlay_row)
         overlay_layout.addLayout(boxes_row)
-        overlay_layout.addLayout(overlay_form)
+        overlay_layout.addWidget(configure_button)
+        overlay_layout.addWidget(preview_button)
+
+        distance_box = QGroupBox('Distance overlay')
+        self.target_box = QCheckBox('Show window')
+        self.target_box.setToolTip('A second small overlay with the distance to the selected target when it is in '
+                                   'your group or raid, meant to sit beside the target window. Drag it by its '
+                                   'Distance header. Other targets show --, since Zeal sends no position for them.')
+        self.target_box.setChecked(overlay.settings['target_window'])
+        self.target_box.toggled.connect(self.set_target_window)
+        target_reset_button = QPushButton('Re-center')
+        target_reset_button.setToolTip('Move the Distance overlay back to the top center of the screen.')
+        target_reset_button.clicked.connect(target.reset_position)
+        self.target_lock_box = QCheckBox('Lock position')
+        self.target_lock_box.setToolTip("Stop the Distance overlay's header from being dragged, so a stray click "
+                                        "can't move it.")
+        self.target_lock_box.setChecked(overlay.settings['target_locked'])
+        self.target_lock_box.toggled.connect(self.set_target_locked)
+        target_lock_box = self.target_lock_box
+        self.target_header_box = QCheckBox('Show header bar')
+        self.target_header_box.setToolTip('Untick to show just the distance, without the Distance header or the '
+                                          'bottom edge. Preview shows them again for a moment so you can drag the '
+                                          'overlay.')
+        self.target_header_box.setChecked(overlay.settings['target_show_header'])
+        self.target_header_box.toggled.connect(self.set_target_show_header)
+        target_configure_button = QPushButton('Other settings')
+        target_configure_button.setToolTip('Text size, background opacity and the white and yellow distance cutoffs.')
+        target_configure_button.clicked.connect(
+            lambda: self.open_dialog('distance', lambda: OverlayDialog(self, 'distance overlay', DISTANCE_SETTINGS))
+        )
+        distance_row = QHBoxLayout()
+        distance_row.addWidget(self.target_box, 1)
+        distance_row.addWidget(target_reset_button)
+        target_boxes_row = QHBoxLayout()
+        target_boxes_row.addWidget(target_lock_box)
+        target_boxes_row.addWidget(self.target_header_box)
+        target_boxes_row.addStretch()
+        distance_note = QLabel('Only players in your group or raid have a known distance. Mobs, pets and other '
+                               'players show --.')
+        distance_note.setWordWrap(True)
+        distance_layout = QVBoxLayout(distance_box)
+        distance_layout.addLayout(distance_row)
+        distance_layout.addWidget(distance_note)
+        distance_layout.addLayout(target_boxes_row)
+        distance_layout.addWidget(target_configure_button)
+        target_preview_button = QPushButton('Preview')
+        target_preview_button.setToolTip(f'Show the Distance overlay with a sample distance for {PREVIEW_SECONDS:g} '
+                                         'seconds to check its size and position, even while it is switched off.')
+        target_preview_button.clicked.connect(lambda: self.preview(target))
+        distance_layout.addWidget(target_preview_button)
 
         alerts_box = QGroupBox('Alerts')
-        alert_types_button = QPushButton('Alert types && sounds\u2026')
-        alert_types_button.setToolTip('Choose which alerts show on the overlay and which play a sound.')
-        alert_types_button.clicked.connect(lambda: self.open_dialog(AlertTypesDialog))
-        thresholds_button = QPushButton('Health thresholds\u2026')
+        alert_types_button = QPushButton('Configure alert types')
+        alert_types_button.setToolTip('Choose which alerts show on the overlay, which play a sound, and the sounds.')
+        alert_types_button.clicked.connect(lambda: self.open_dialog('alerts', lambda: AlertTypesDialog(self)))
+        thresholds_button = QPushButton('Configure health thresholds')
         thresholds_button.setToolTip('Set the warning and critical health levels for each class and for pets.')
-        thresholds_button.clicked.connect(lambda: self.open_dialog(ThresholdsDialog))
-        alerts_buttons = QHBoxLayout()
-        alerts_buttons.addWidget(alert_types_button)
-        alerts_buttons.addWidget(thresholds_button)
+        thresholds_button.clicked.connect(lambda: self.open_dialog('thresholds', lambda: ThresholdsDialog(self)))
         self.scope_button = QPushButton()
         self.scope_button.setToolTip('In a raid, select the groups you want to monitor. Your own group (the character '
                                      'in the active EQ window) and pinned players are always monitored.')
@@ -1450,12 +1663,12 @@ class ControlWindow(QWidget):
         alerts_form.addRow(self.distance_box, self.make_setting_spin('range'))
         self.spins['range'].setEnabled(overlay.settings['distance_warning'])
         alerts_layout = QVBoxLayout(alerts_box)
-        alerts_layout.addLayout(alerts_buttons)
+        alerts_layout.addWidget(alert_types_button)
+        alerts_layout.addWidget(thresholds_button)
         alerts_layout.addLayout(scope_row)
         alerts_layout.addLayout(alerts_form)
-        self.dialogs = {}
 
-        pins_box = QGroupBox('Pinned players (always shown at the top)')
+        pins_box = QGroupBox('Pinned players (always at the top of the Triage overlay)')
         self.pin_list = QListWidget()
         self.pin_list.setFixedHeight(PIN_LIST_HEIGHT)
         self.pin_name = QComboBox()
@@ -1476,8 +1689,8 @@ class ControlWindow(QWidget):
 
         defaults_button = QPushButton('Restore defaults')
         defaults_button.setToolTip(
-            'Reset the Overlay and Alerts settings, including alert types, sounds and class thresholds. '
-            'Pins, position and lock are kept.'
+            'Reset every setting, both overlays\' positions and locks, and the pinned players. You will be asked to '
+            'confirm.'
         )
         defaults_button.clicked.connect(self.restore_defaults)
         docs_button = QPushButton('Read the docs')
@@ -1494,21 +1707,49 @@ class ControlWindow(QWidget):
         layout.addWidget(intro)
         layout.addWidget(self.status)
         layout.addWidget(self.update_notice)
+        # Everything that feeds the Triage overlay comes first; the Distance overlay, independent of it, last.
         layout.addWidget(overlay_box)
         layout.addWidget(alerts_box)
         layout.addWidget(pins_box)
+        layout.addWidget(distance_box)
         layout.addLayout(buttons)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(STATUS_MS)
         self.refresh()
 
+    def windows(self):
+        return self.overlay, self.target
+
     def change_setting(self, key, value):
         self.overlay.settings[key] = value
+        if key in DISTANCE_SETTINGS:
+            self.couple_distance_spins()
+        self.save_and_redraw()
+
+    def couple_distance_spins(self):
+        # The white cutoff can't pass the yellow one, and the other way round. The spins exist only once the
+        # Distance overlay's Configure window has been opened.
+        if 'target_near' in self.spins:
+            self.spins['target_near'].setMaximum(self.overlay.settings['target_far'])
+            self.spins['target_far'].setMinimum(self.overlay.settings['target_near'])
+
+    def apply_visibility(self):
+        # Each overlay shows while its Show window checkbox is on. A preview in progress is left alone, so a
+        # disabled overlay can still be previewed and placed; the next refresh puts it away again.
+        for window, key in ((self.overlay, 'triage_window'), (self.target, 'target_window')):
+            if not window.previewing():
+                window.setVisible(self.overlay.settings[key])
+
+    def set_triage_window(self, enabled):
+        self.overlay.settings['triage_window'] = enabled
         save_json(SETTINGS_FILE, self.overlay.settings)
-        if key in ('font_size', 'width', 'rows'):
-            self.overlay.apply_font()
-        self.overlay.redraw()
+        self.apply_visibility()
+
+    def set_target_window(self, enabled):
+        self.overlay.settings['target_window'] = enabled
+        save_json(SETTINGS_FILE, self.overlay.settings)
+        self.apply_visibility()
 
     def add_spins(self, form, keys):
         for key in keys:
@@ -1520,6 +1761,7 @@ class ControlWindow(QWidget):
         spin.setRange(minimum, maximum)
         spin.setSuffix(suffix)
         spin.setValue(self.overlay.settings[key])
+        spin.setToolTip(SETTING_TOOLTIPS.get(key, ''))
         spin.valueChanged.connect(lambda value: self.change_setting(key, value))
         self.spins[key] = spin
         return spin
@@ -1539,47 +1781,80 @@ class ControlWindow(QWidget):
         self.spins['range'].setEnabled(enabled)
         self.save_and_redraw()
 
-    def open_dialog(self, dialog_class):
-        # One instance per dialog, reused, so reopening shows it as it was left.
-        if dialog_class not in self.dialogs:
-            self.dialogs[dialog_class] = dialog_class(self)
-        dialog = self.dialogs[dialog_class]
+    def open_dialog(self, name, make):
+        # One instance per window, created on first use and reused, so reopening shows it as it was left.
+        if name not in self.dialogs:
+            self.dialogs[name] = make()
+        dialog = self.dialogs[name]
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
 
     def save_and_redraw(self):
         save_json(SETTINGS_FILE, self.overlay.settings)
-        self.overlay.redraw()
+        for window in self.windows():
+            window.apply_font()
+            window.redraw()
 
     def set_locked(self, locked):
         self.overlay.settings['locked'] = locked
         save_json(SETTINGS_FILE, self.overlay.settings)
 
-    def set_rows_only(self, rows_only):
-        self.overlay.settings['rows_only'] = rows_only
+    def set_target_locked(self, locked):
+        self.overlay.settings['target_locked'] = locked
+        save_json(SETTINGS_FILE, self.overlay.settings)
+
+    def set_show_header(self, show_header):
+        self.overlay.settings['show_header'] = show_header
+        self.save_and_redraw()
+
+    def set_target_show_header(self, show_header):
+        self.overlay.settings['target_show_header'] = show_header
         self.save_and_redraw()
 
     def restore_defaults(self):
+        # Everything goes, so it asks first.
+        answer = QMessageBox.question(
+            self, f'{APP_NAME}: restore defaults',
+            'Restore all default settings?\n\nThis resets every setting, moves both overlays back to the center of '
+            'the screen, unlocks them and removes all pinned players.',
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer == QMessageBox.Yes:
+            self.apply_defaults()
+
+    def apply_defaults(self):
         for key, (default, *_) in SETTINGS.items():
-            self.spins[key].setValue(default)
+            # A spin exists only once its window has been opened, so the value is set directly as well.
+            self.overlay.settings[key] = default
+            if key in self.spins:
+                self.spins[key].setValue(default)
         self.overlay.settings['thresholds'] = default_thresholds()
         self.overlay.settings.update(event_defaults({}))
         self.distance_box.setChecked(True)
-        self.rows_only_box.setChecked(False)
+        self.show_header_box.setChecked(True)
+        self.target_header_box.setChecked(True)
+        self.target_box.setChecked(True)
+        self.triage_box.setChecked(True)
         self.overlay.settings['hidden_groups'] = []
         self.overlay.settings['drop_rate'] = DEFAULT_DROP_RATE
+        # Locks and positions live outside SETTINGS, and pins in their own file; all of them go too.
+        self.lock_box.setChecked(False)
+        self.target_lock_box.setChecked(False)
+        self.overlay.settings['locked'] = self.overlay.settings['target_locked'] = False
+        for window in self.windows():
+            window.reset_position()
+        self.overlay.set_pinned([])
         self.show_scope()
         self.save_and_redraw()
         for dialog in self.dialogs.values():
             dialog.load()
-
-    def preview(self):
-        self.overlay.start_preview()
         self.refresh()
 
-    def toggle_overlay(self):
-        self.overlay.setVisible(not self.overlay.isVisible())
+    def preview(self, window):
+        # Each section's Preview shows only its own overlay, even a switched-off one, so it can be sized and placed;
+        # apply_visibility puts a switched-off one away again once the preview ends.
+        window.start_preview()
         self.refresh()
 
     def pin_player(self):
@@ -1607,7 +1882,7 @@ class ControlWindow(QWidget):
             self.update_notice.show()
         color, message = feed_status()
         self.status.setText(f'<span style="color:{color}">&#9679;</span> {message}')
-        self.visibility_button.setText('Hide' if self.overlay.isVisible() else 'Show')
+        self.apply_visibility()
 
         # Pins can also change from the overlay itself, so the list follows it.
         if [self.pin_list.item(i).text() for i in range(self.pin_list.count())] != self.overlay.pinned:
@@ -1622,6 +1897,47 @@ class ControlWindow(QWidget):
 
     def closeEvent(self, event):
         QApplication.quit()
+
+
+def fit_dialog(dialog):
+    # A word-wrapped note makes Qt guess the dialog's height before its width is known, which left blank space under
+    # the content. Once the layout exists, the dialog is sized to what it needs at its own width and kept there.
+    layout = dialog.layout()
+    layout.activate()
+    width = dialog.sizeHint().width()
+    height = layout.heightForWidth(width) if layout.hasHeightForWidth() else dialog.sizeHint().height()
+    dialog.setFixedSize(width, height)
+
+
+class OverlayDialog(QDialog):
+    # The Configure window for one overlay's look: its SETTINGS spins, built through the control window so changes
+    # apply and save live like every other setting. Lock position and Show header bar stay on the main window.
+    def __init__(self, control, title, keys):
+        super().__init__(control)
+        self.control = control
+        self.keys = keys
+        self.setWindowTitle(f'{APP_NAME}: {title}')
+        form = QFormLayout()
+        control.add_spins(form, keys)
+        close_button = QPushButton('Close')
+        close_button.clicked.connect(self.close)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(close_button)
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addLayout(buttons)
+        self.load()
+        fit_dialog(self)
+
+    def load(self):
+        # Show the saved values without treating it as a change.
+        for key in self.keys:
+            spin = self.control.spins[key]
+            spin.blockSignals(True)
+            spin.setValue(self.control.overlay.settings[key])
+            spin.blockSignals(False)
+        self.control.couple_distance_spins()
 
 
 class RaidGroupsDialog(QDialog):
@@ -1650,6 +1966,7 @@ class RaidGroupsDialog(QDialog):
         layout.addWidget(QLabel('Select the groups you want to monitor.\nYour own group is always monitored.'))
         layout.addLayout(grid)
         layout.addLayout(buttons)
+        fit_dialog(self)
 
     def hidden(self):
         return [number for number, box in enumerate(self.boxes, start=1) if not box.isChecked()]
@@ -1661,7 +1978,7 @@ class AlertTypesDialog(QDialog):
     def __init__(self, control):
         super().__init__(control)
         self.control = control
-        self.setWindowTitle(f'{APP_NAME}: alert types & sounds')
+        self.setWindowTitle(f'{APP_NAME}: alert types')
         self.boxes = {'show': {}, 'sound': {}}
         self.pickers = {}
         # One section per alert: its name, then a line to show it on the overlay, then a line to play a sound.
@@ -1710,6 +2027,7 @@ class AlertTypesDialog(QDialog):
         layout.addSpacing(NOTE_SPACING)
         layout.addLayout(buttons)
         self.load()
+        fit_dialog(self)
 
     def make_picker(self, key):
         picker = QComboBox()
@@ -1834,6 +2152,7 @@ class ThresholdsDialog(QDialog):
         layout.addWidget(note)
         layout.addLayout(buttons)
         self.load()
+        fit_dialog(self)
 
     def make_spin(self, handler, minimum=1, spin_class=QSpinBox):
         spin = spin_class()
@@ -1976,12 +2295,19 @@ def main():
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
     app = QApplication(sys.argv[:1])
     app.setWindowIcon(app_icon())
-    window = TriageWindow(load_settings())
-    position = load_position()
-    window.move(*(position if position and window.on_screen(*position) else window.default_position()))
-    window.show()
+    settings = load_settings()
+    window = TriageWindow(settings)
+    target = TargetWindow(settings)
+    for overlay in (window, target):
+        position = load_position(overlay.POSITION_KEY)
+        overlay.move(*(position if position and overlay.on_screen(*position) else overlay.default_position()))
+    if settings['triage_window']:
+        window.show()
+    if settings['target_window']:
+        target.show()
     window.start()
-    control = ControlWindow(window)
+    target.start()
+    control = ControlWindow(window, target)
     control.show()
 
     signal.signal(signal.SIGINT, lambda *_: app.quit())

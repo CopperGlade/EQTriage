@@ -270,6 +270,123 @@ def test_with_distance_rounds_halves_up():
     assert triage.with_distance(row, math.inf)[2] == ' 30% (other zone)'
 
 
+# Target distance
+
+
+def target(spawn_id, own=(0, 0, 0)):
+    triage.handle_player({'location': {'x': own[0], 'y': own[1], 'z': own[2]}, 'target_id': spawn_id}, PIPE)
+
+
+def test_target_in_group_shows_its_distance(settings):
+    triage.handle_members([{'name': 'Mera', 'spawn_id': 42, 'loc': {'x': 30, 'y': 40, 'z': 0}}], PIPE)
+    target(42)
+    with triage.state_lock:
+        row = triage.target_row(settings, PIPE, triage.time.monotonic())
+    assert row[:4] == ('', '50 away', '', triage.PINNED_COLOR)
+    for x, y, text, color in ((60, 80, '100 away', triage.PINNED_COLOR), (90, 120, '150 away', triage.LOW_HP_COLOR),
+                              (300, 400, '500 away', triage.CRITICAL_HP_COLOR)):
+        triage.handle_members([{'name': 'Mera', 'spawn_id': 42, 'loc': {'x': x, 'y': y, 'z': 0}}], PIPE)
+        with triage.state_lock:
+            row = triage.target_row(settings, PIPE, triage.time.monotonic())
+        assert row[:4] == ('', text, '', color)
+
+
+def test_distance_overlay_has_its_own_look_settings(qapp, settings):
+    assert (settings['target_font_size'], settings['target_opacity'], settings['target_show_header']) == (10, 70, True)
+    window = triage.TargetWindow(settings)
+    before = window.text_width
+    settings['font_size'] = 20
+    window.apply_font()
+    assert window.text_width == before, 'the Triage overlay text size leaves it alone'
+    settings['target_font_size'] = 20
+    window.apply_font()
+    assert window.text_width > before
+    settings['show_header'] = False
+    assert window.frame_shown()
+    settings['target_show_header'] = False
+    assert not window.frame_shown()
+    settings['target_opacity'] = 0
+    assert window.opacity() == 0 and triage.TriageWindow(settings).opacity() == 70
+    assert settings['target_locked'] is False
+    settings['locked'] = True
+    assert not window.locked() and triage.TriageWindow(settings).locked()
+    settings['target_locked'] = True
+    assert window.locked()
+
+
+def test_each_overlay_has_its_own_show_switch(tmp_path, settings):
+    assert settings['triage_window'] is True and settings['target_window'] is True
+    (tmp_path / 'settings.json').write_text(json.dumps({'triage_window': False, 'target_window': False}))
+    settings = triage.load_settings()
+    assert settings['triage_window'] is False and settings['target_window'] is False
+    (tmp_path / 'settings.json').write_text(json.dumps({'triage_window': 'no'}))
+    assert triage.load_settings()['triage_window'] is True, 'anything but False keeps the list'
+
+
+def test_distance_cutoffs_load_in_order(tmp_path):
+    (tmp_path / 'settings.json').write_text(json.dumps({'target_near': 300, 'target_far': 150}))
+    settings = triage.load_settings()
+    assert (settings['target_near'], settings['target_far']) == (150, 150)
+    (tmp_path / 'settings.json').write_text('{}')
+    settings = triage.load_settings()
+    assert (settings['target_near'], settings['target_far']) == (100, 200)
+
+
+def test_target_member_without_a_position_is_out_of_zone(clock, settings):
+    triage.handle_members([{'name': 'Mera', 'spawn_id': 42, 'loc': {'x': 30, 'y': 40, 'z': 0}}], PIPE)
+    clock.advance(triage.STALE_SECONDS)
+    triage.handle_members([{'name': 'Mera', 'spawn_id': 42}], PIPE)
+    target(42)
+    with triage.state_lock:
+        assert triage.target_row(settings, PIPE, clock.now) == triage.OUT_OF_ZONE_ROW
+
+
+def test_target_outside_the_group_shows_dashes(settings):
+    triage.handle_members([{'name': 'Mera', 'spawn_id': 42, 'loc': {'x': 30, 'y': 40, 'z': 0}}], PIPE)
+    target(99)
+    with triage.state_lock:
+        row = triage.target_row(settings, PIPE, triage.time.monotonic())
+    assert row == triage.NO_DISTANCE_ROW
+
+
+def test_no_target_or_stale_target_gives_an_empty_row(clock, settings):
+    with triage.state_lock:
+        assert triage.target_row(settings, PIPE, clock.now) == triage.EMPTY_ROW
+    triage.handle_player({'location': {'x': 0, 'y': 0, 'z': 0}}, PIPE)
+    with triage.state_lock:
+        assert triage.target_row(settings, PIPE, clock.now) == triage.EMPTY_ROW
+    target(42)
+    clock.advance(triage.STALE_SECONDS)
+    with triage.state_lock:
+        assert triage.target_row(settings, PIPE, clock.now) == triage.EMPTY_ROW
+
+
+def test_position_file_keeps_both_windows(tmp_path):
+    triage.save_position(10, 20)
+    triage.save_position(30, 40, triage.TARGET_POSITION_KEY)
+    triage.save_position(11, 21)
+    assert triage.load_position() == (11, 21)
+    assert triage.load_position(triage.TARGET_POSITION_KEY) == (30, 40)
+    assert triage.load_position('other') is None
+
+
+def test_target_window_is_one_row_without_pins(qapp, settings):
+    window = triage.TargetWindow(settings)
+    assert window.height() == triage.HEADER_HEIGHT + window.row_height + triage.ROW_GAP
+    assert window.width() == 2 * triage.PADDING + window.text_width
+    assert window.text_width < triage.TriageWindow(settings).text_width
+    settings['font_size'] = 7
+    window.apply_font()
+    from PySide6.QtGui import QFontMetrics
+    assert window.text_width >= QFontMetrics(window.title_font).horizontalAdvance(window.TITLE)
+    assert window.sounds is None and window.TITLE == 'Distance'
+    window.preview_until = triage.time.monotonic() + 10
+    assert window.current_rows() == [triage.TARGET_SAMPLE_ROW]
+    window.preview_until = 0
+    assert window.current_rows() == [triage.EMPTY_ROW]
+    assert settings['target_window'] is True
+
+
 # Charm breaks
 
 
@@ -598,7 +715,7 @@ def test_overlay_size_follows_the_settings_and_renders(qapp, settings):
     assert window.on_screen(0, 0) and not window.on_screen(100_000, 100_000)
 
 
-def test_rows_only_hides_the_header_and_bottom_edge_except_in_preview(qapp, settings):
+def test_unticking_show_header_hides_the_header_and_bottom_edge_except_in_preview(qapp, settings):
     from PySide6.QtCore import QEvent, QPointF
     from PySide6.QtGui import QMouseEvent
     settings['opacity'] = 0
@@ -618,17 +735,77 @@ def test_rows_only_hides_the_header_and_bottom_edge_except_in_preview(qapp, sett
         return window.drag_offset is not None
 
     assert alpha(header) > 0 and alpha(bottom) > 0 and press_header()
-    settings['rows_only'] = True
+    settings['show_header'] = False
     assert alpha(header) == 0 and alpha(bottom) == 0 and not press_header()
     assert window.height() == triage.HEADER_HEIGHT + settings['rows'] * window.row_height + triage.ROW_GAP
     window.preview_until = triage.time.monotonic() + 10
     assert alpha(header) > 0 and alpha(bottom) > 0 and press_header()
 
 
-def test_rows_only_setting_is_saved_and_off_by_default(tmp_path, settings):
-    assert settings['rows_only'] is False
-    (tmp_path / 'settings.json').write_text(json.dumps({'rows_only': True}))
-    assert triage.load_settings()['rows_only'] is True
+def test_show_header_setting_is_saved_and_on_by_default(tmp_path, settings):
+    assert settings['show_header'] is True and settings['target_show_header'] is True
+    (tmp_path / 'settings.json').write_text(json.dumps({'show_header': False, 'target_show_header': 'x'}))
+    loaded = triage.load_settings()
+    assert loaded['show_header'] is False and loaded['target_show_header'] is True
+
+
+def make_control(settings):
+    return triage.ControlWindow(triage.TriageWindow(settings), triage.TargetWindow(settings))
+
+
+def test_configure_windows_hold_the_spins_and_apply_live(qapp, settings):
+    control = make_control(settings)
+    assert not control.spins.keys() & set(triage.OVERLAY_SETTINGS + triage.DISTANCE_SETTINGS)
+    control.open_dialog('triage', lambda: triage.OverlayDialog(control, 'triage overlay', triage.OVERLAY_SETTINGS))
+    control.open_dialog('distance', lambda: triage.OverlayDialog(control, 'distance overlay', triage.DISTANCE_SETTINGS))
+    assert set(triage.OVERLAY_SETTINGS + triage.DISTANCE_SETTINGS) <= control.spins.keys()
+    control.spins['target_font_size'].setValue(14)
+    assert settings['target_font_size'] == 14 and control.target.font_size() == 14
+    # The white cutoff can't pass the yellow one.
+    control.spins['target_far'].setValue(120)
+    assert control.spins['target_near'].maximum() == 120
+    assert control.dialogs['triage'].windowTitle().endswith('triage overlay')
+
+
+def test_restore_defaults_works_before_any_configure_window_opened(qapp, settings):
+    settings['target_font_size'] = 14
+    settings['rows'] = 5
+    settings['target_show_header'] = False
+    control = make_control(settings)
+    control.apply_defaults()
+    assert settings['target_font_size'] == 10 and settings['rows'] == 10
+    assert settings['target_show_header'] is True and settings['target_window'] is True
+    assert control.overlay.height() == triage.HEADER_HEIGHT + 10 * control.overlay.row_height + triage.ROW_GAP
+
+
+def test_restore_defaults_also_resets_positions_locks_and_pins(qapp, settings, tmp_path):
+    settings['locked'] = settings['target_locked'] = True
+    control = make_control(settings)
+    control.overlay.set_pinned(['Mera'])
+    for window in control.windows():
+        window.move(5, 5)
+        assert (window.x(), window.y()) != window.default_position()
+    control.apply_defaults()
+    assert settings['locked'] is False and settings['target_locked'] is False
+    assert control.overlay.pinned == [] and triage.load_pins() == []
+    for window in control.windows():
+        assert (window.x(), window.y()) == window.default_position()
+    assert triage.load_position() == control.overlay.default_position()
+    assert triage.load_position(triage.TARGET_POSITION_KEY) == control.target.default_position()
+
+
+def test_every_dialog_is_sized_to_its_content(qapp, settings):
+    control = make_control(settings)
+    dialogs = [
+        triage.AlertTypesDialog(control), triage.ThresholdsDialog(control), triage.RaidGroupsDialog(control, []),
+        triage.OverlayDialog(control, 'triage overlay', triage.OVERLAY_SETTINGS),
+    ]
+    for dialog in dialogs:
+        dialog.show()
+        qapp.processEvents()
+        layout = dialog.layout()
+        needed = layout.heightForWidth(dialog.width()) if layout.hasHeightForWidth() else layout.sizeHint().height()
+        assert dialog.height() == needed, type(dialog).__name__
 
 
 def test_long_names_are_elided_but_tags_stay(qapp, settings):

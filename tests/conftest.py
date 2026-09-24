@@ -28,7 +28,7 @@ import triage  # noqa: E402
 REAL_WRITE_SOUND = triage.write_sound
 STATE = ('members', 'pet_hp', 'charm_breaks', 'deaths', 'own_locations', 'member_locations', 'charmer_hits',
          'hp_seen', 'hp_history', 'dropping_until', 'member_classes', 'raid_groups', 'pipe_characters',
-         'member_messages')
+         'member_messages', 'targets', 'member_spawns')
 
 
 class Clock:

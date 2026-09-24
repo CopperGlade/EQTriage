@@ -12,7 +12,7 @@ EQ Triage sits on top of EverQuest and lists the people who need attention: play
 
    Unlike Zeal, EQ Triage is a separate program rather than a plugin, so it works from any folder. Keeping it in its own folder inside EverQuest just keeps everything together. The folder must be one you can write to, because EQ Triage saves its settings there, so avoid `Program Files`.
 4. **Start EQ Triage.** Run `EQTriage.exe`. A desktop shortcut to it is handy. It can start before or after EverQuest, and it connects to every EverQuest window you have open, so multiboxing needs no extra setup.
-5. **Place the overlay.** Click **Preview** in the EQ Triage window to fill the overlay with sample rows for 10 seconds, then drag it by the *Triage* header to wherever you want it. The position is remembered. Tick **Lock position** once it's where you want it, so a stray click can't move it.
+5. **Place the overlay.** Click **Preview** in the EQ Triage window to fill the overlay with sample rows for 15 seconds, then drag it by the *Triage* header to wherever you want it. The position is remembered. Tick **Lock position** once it's where you want it, so a stray click can't move it.
 
 > [!NOTE]
 > Windows may show a SmartScreen warning the first time, because the program isn't signed. Choose **More info → Run anyway**.
@@ -46,13 +46,13 @@ Long names are shortened with … so the health and tags always stay visible.
 
 ### Warning and critical health
 
-Group and raid members show in yellow once they drop below their class's warning level and in red below its critical level: 40% / 25% for melee, 60% / 40% for hybrid casters and 75% / 50% for pure casters by default, since they die very fast. Both levels can be changed per class under **Health thresholds…**. Your own pets and your group members' pets are included, sorted in with the players by health. Raid members' pets aren't, because Zeal doesn't send them.
+Group and raid members show in yellow once they drop below their class's warning level and in red below its critical level: 40% / 25% for melee, 60% / 40% for hybrid casters and 75% / 50% for pure casters by default, since they die very fast. Both levels can be changed per class under **Configure health thresholds**. Your own pets and your group members' pets are included, sorted in with the players by health. Raid members' pets aren't, because Zeal doesn't send them.
 
 Your own characters are never listed, since you can see your own health bar. That covers every character logged in on one of your EverQuest windows, for their health, dropping fast, death and charmer alerts and sounds alike. Their pets still show. Pin one of your own characters to see its health anyway.
 
 ### Dropping fast
 
-A player losing health quickly gets ▼ after their health, e.g. `Sebik 70% ▼`, and is listed even while still above their warning level. A tank at 90% taking a rampage is in more danger than a caster sitting at 45%, and the marker catches that before the health number does. By default, "fast" means losing more than 15% of their health per second; change it on the Dropping fast row of **Alert types & sounds…**. The loss has to come from at least two separate hits within that second: one big hit, or a caster's own mana-conversion spell, is a spike rather than a fall and doesn't count, while a rampage or a pet turning on its charmer does. The marker stays for a moment after the drop slows, so it doesn't flicker between hits. Each time it fires, `triage.log` gets a line with the name and the rate, so you can check afterwards why someone was listed.
+A player losing health quickly gets ▼ after their health, e.g. `Sebik 70% ▼`, and is listed even while still above their warning level. A tank at 90% taking a rampage is in more danger than a caster sitting at 45%, and the marker catches that before the health number does. By default, "fast" means losing more than 15% of their health per second; change it on the Dropping fast row of **Configure alert types**. The loss has to come from at least two separate hits within that second: one big hit, or a caster's own mana-conversion spell, is a spike rather than a fall and doesn't count, while a rampage or a pet turning on its charmer does. The marker stays for a moment after the drop slows, so it doesn't flicker between hits. Each time it fires, `triage.log` gets a line with the name and the rate, so you can check afterwards why someone was listed.
 
 Someone dropping fast is sorted by where they will be in a couple of seconds at that rate, so a fast fall ranks above a steady low. Pets don't get the marker.
 
@@ -87,7 +87,7 @@ When the game reports a group or raid member slain (or *You have been slain* / *
 
 ### Distance warnings
 
-Listed players farther from your character than the **Distance warning beyond** setting (70 units by default) show how far away they are, e.g. `Sebik 38% (150 away)`, or `(other zone)`. That tells you before you start a long heal whether it can land, and whether they need to take a step closer or are across the zone. The distance is rounded to the nearest 10 so it doesn't flicker as people move.
+Listed players farther from your character than the **Show distance beyond** setting (70 units by default) show how far away they are, e.g. `Sebik 38% (150 away)`, or `(other zone)`. That tells you before you start a long heal whether it can land, and whether they need to take a step closer or are across the zone. The distance is rounded to the nearest 10 so it doesn't flicker as people move.
 
 Distance is measured from whichever EverQuest window is active, so it follows you when you switch characters. The 70-unit default warns a little before the edge of the main cleric heals:
 
@@ -97,7 +97,22 @@ Distance is measured from whichever EverQuest window is active, so it follows yo
 | Remedy, Ethereal Remedy | 200 |
 | Word of Redemption (group) | 70 around you |
 
-Pets, `DEAD` rows and `CHARM BREAK` rows never show a distance. To turn distance warnings off, untick **Distance warning beyond** in the Alerts section.
+Pets, `DEAD` rows and `CHARM BREAK` rows never show a distance. To turn distance warnings off, untick **Show distance beyond** in the Alerts section.
+
+### Target distance window
+
+EQ Triage has two overlays: the **Triage overlay**, the list described above, and the **Distance overlay**, a tiny one-row window with the *Distance* header. Tick **Show window** under *Distance overlay* to turn it on. It shows one thing: the exact distance to your target, e.g. `45 away`, whenever the target is a member of your group or raid, or `Out of zone` in red when that member has no position in your zone. It's small on purpose, meant to sit right beside EverQuest's own target window, which already shows the name. The color tells you which heals can reach them:
+
+| Distance | Color | By default |
+|---|---|---|
+| up to *Display yellow farther than* | White | 100 units, the range of Complete Healing, Divine Light and the other main heals |
+| up to *Display red farther than* | Yellow | 200 units, where only Remedy still reaches |
+| beyond that | Red | nothing reaches; one of you has to move |
+
+Both cutoffs are set in the *Distance overlay* section, so other classes can match their own spells.
+
+> [!IMPORTANT]
+> The distance is only known for **player characters in your group or raid**. Zeal sends positions for nobody else, so a mob, any pet (including your own) or a player outside your group and raid shows `--` instead of a distance, and no target leaves the row empty. The section in the EQ Triage window says the same. The Distance overlay follows the character in the active EverQuest window, is on by default, and is dragged by its own header, with its own **Re-center**, **Lock position**, **Show header bar**, text size and background opacity, so it can be tuned for its spot beside the target window without touching the list. Nothing but Preview is shared between the two overlays.
 
 ### Pinning
 
@@ -116,11 +131,13 @@ Pet rows can't be pinned.
 The **EQ Triage window** opens on the desktop where you started EQ Triage and has the taskbar button. Its status line shows which characters are connected.
 
 - **Move:** drag the *Triage* header of the overlay.
-- **Preview:** under *Overlay*, fills the overlay with one of each row type for 10 seconds, so you can check its size, width and position without waiting for someone to get hurt.
-- **Hide / Show:** under *Overlay*, hides the overlay without quitting, for example while trading or AFK. Sounds keep playing while it's hidden.
-- **Re-center:** under *Overlay*, moves the overlay back to the top center of the screen if it ever ends up off-screen. It works even when the position is locked. EQ Triage also re-centers on its own at startup when the saved position is on no screen, for example after unplugging a monitor.
-- **Lock position:** under *Overlay*, stops the header from being dragged. While locked, clicks on the header go straight through to the game like the rest of the overlay; the pins still work. The lock is remembered between sessions.
-- **Rows only:** under *Overlay*, hides the *Triage* header and the bottom edge, so nothing but the rows sits over the game. The rows stay exactly where they were. With no header there is nothing to drag, so **Preview** brings the header back for its 10 seconds whenever you need to move the overlay. *Background opacity* still applies to what's left (the rows' background, border and dividers); set it to 0% for text alone.
+- **Preview:** the last button in each overlay section. It fills that overlay with sample rows for 15 seconds, even while it is switched off, so you can check its size, width and position without waiting for someone to get hurt.
+- **Show window:** under *Triage overlay*, turns the list itself on or off. Untick it to run only the Distance overlay. It's remembered between sessions, and sounds still play while the list is off.
+- **Show window:** under *Distance overlay*, shows or hides the second overlay described in [Target distance window](#target-distance-window). It's remembered between sessions, has its own position and its own **Re-center**.
+- **Other settings:** under each overlay section, opens a small window with that overlay's look settings (text size, background opacity and so on, listed under [Settings](#settings)). Changes apply as you make them; there is nothing to save.
+- **Re-center:** under *Triage overlay*, moves the overlay back to the top center of the screen if it ever ends up off-screen. It works even when the position is locked. EQ Triage also re-centers on its own at startup when the saved position is on no screen, for example after unplugging a monitor.
+- **Lock position:** under *Triage overlay*, stops the header from being dragged. While locked, clicks on the header go straight through to the game like the rest of the overlay; the pins still work. The lock is remembered between sessions.
+- **Show header bar:** under *Triage overlay*, on by default. Untick it to hide the *Triage* header and the bottom edge, so nothing but the rows sits over the game. The rows stay exactly where they were. With no header there is nothing to drag, so **Preview** brings the header back for its 15 seconds whenever you need to move the overlay. *Background opacity* still applies to what's left (the rows' background, border and dividers); set it to 0% for text alone.
 - **Pin / unpin:** click the pin at the right of a player row, or use *Pinned players* in the EQ Triage window.
 - **This page:** click **Read the docs**.
 - **Close:** click **Quit**, or just close the EQ Triage window.
@@ -132,18 +149,32 @@ Everything else on the overlay lets your mouse clicks through to the game.
 
 The EQ Triage window groups its settings by what they control. Changes apply to the overlay immediately and are remembered between sessions.
 
-**Overlay**: how the overlay looks.
+The sections run top to bottom: *Triage overlay*, *Alerts* and *Pinned players*, which all concern the list, then *Distance overlay*.
+
+**Triage overlay**: how the list overlay looks. Show window, Re-center, Lock position, Show header bar and Preview sit in the section itself (see [Controls](#controls)); the settings below are behind **Other settings**.
 
 | Setting | Default | What it does |
 |---|---|---|
 | Text size | 10 pt | Text size of the rows. The overlay resizes to match. |
 | Overlay width | 26 characters | How wide the overlay is, counted in characters of text so it grows with the text size. Widen it if long names get shortened with …. |
-| Background opacity | 70% | How visible the overlay's frame is, from 0% (fully clear) to 100% (solid): the dark background, the outer border and the lines between rows. The text, alert colors, pins, the *Triage* header and the bottom edge always stay fully visible, so at 0% you see just the rows between the header and a thin bottom line. Tick **Rows only** to drop the header and bottom edge too. |
+| Background opacity | 70% | How visible the overlay's frame is, from 0% (fully clear) to 100% (solid): the dark background, the outer border and the lines between rows. The text, alert colors, pins, the *Triage* header and the bottom edge always stay fully visible, so at 0% you see just the rows between the header and a thin bottom line. Tick **Show header bar** to drop the header and bottom edge too. |
 | Number of rows | 10 | How many rows the overlay has, from 3 to 25. The overlay grows or shrinks to match. |
+
+**Distance overlay**: the second overlay, see [Target distance window](#target-distance-window). Show window, Re-center, Lock position, Show header bar and its own Preview sit in the section itself; the last four settings are behind **Other settings**.
+
+| Setting | Default | What it does |
+|---|---|---|
+| Show window | On | Shows the Distance overlay. The same checkbox under *Triage overlay* (also on by default) does the same for the list, so either overlay can run alone. |
+| Lock position | Off | Stops the Distance overlay's header from being dragged, independently of the Triage overlay's lock. |
+| Show header bar | On | Untick it to show just the distance, without the *Distance* header or the bottom edge. As with the Triage overlay, Preview brings the header back for a moment so you can drag it. |
+| Text size | 10 pt | Text size of the number, independent of the Triage overlay's. |
+| Background opacity | 70% | How visible its frame is, independent of the Triage overlay's. |
+| Display yellow farther than | 100 units | The distance shows in white up to here and in yellow beyond. |
+| Display red farther than | 200 units | The distance shows in red beyond here. It can't be set below *Display yellow farther than*. |
 
 **Alerts**: what gets listed, what makes a sound, and at what health. The Alerts section has two buttons that open their own windows, plus the distance warning.
 
-**Alert types & sounds…** asks two separate questions for each alert type. **Show on overlay** controls whether its rows appear on the overlay. **Play sound** controls whether it makes a sound, and which one. The two are independent: an alert can show silently, or sound without cluttering the overlay (for example, hear deaths without a `DEAD` row). Each alert with a sound also has a **sound picker**: choose from 13 built-in sounds (soft ping, water drop, double chirp, two-note chime, rising chime, bell, marimba rising and falling, horn chord, alarm pulses, siren sweep, klaxon and low gong). Picking a sound plays it, and ▶ plays the current choice again.
+**Configure alert types** asks two separate questions for each alert type. **Show on overlay** controls whether its rows appear on the overlay. **Play sound** controls whether it makes a sound, and which one. The two are independent: an alert can show silently, or sound without cluttering the overlay (for example, hear deaths without a `DEAD` row). Each alert with a sound also has a **sound picker**: choose from 13 built-in sounds (soft ping, water drop, double chirp, two-note chime, rising chime, bell, marimba rising and falling, horn chord, alarm pulses, siren sweep, klaxon and low gong). Picking a sound plays it, and ▶ plays the current choice again.
 
 To use your own sound, pick **Custom file…** at the bottom of the list and choose a `.wav` file; the picker then shows its name, e.g. *Custom: tell.wav*. Only WAV files are supported, since that's what Windows' built-in sound player plays. If the file is later moved or deleted, that alert plays its default built-in sound instead. Restore defaults clears custom files.
 
@@ -163,7 +194,7 @@ Pets have no sound of their own: a pet at low health sounds through the Warning 
 
 Sounds play when an alert starts, not continuously. When several start at once, only the most urgent is heard (charmer hit, then charm break, death, dropping fast, critical, warning). The same alert for the same player won't sound again within 10 seconds, and being healed from red back into yellow is silent. Starting EQ Triage mid-fight doesn't sound for alerts that were already happening. Volume follows your Windows volume. The sounds are generated by EQ Triage itself, so there are no audio files to install.
 
-**Health thresholds…** sets two levels for every class, plus pets and "Unknown class":
+**Configure health thresholds** sets two levels for every class, plus pets and "Unknown class":
 
 - **Warning below:** players below this health are listed, in yellow.
 - **Critical below:** players below this health turn red. It can't be set higher than *Warning below*.
@@ -185,16 +216,16 @@ The list is sorted by how close each person is to their own critical level, so a
 | Setting | Default | What it does |
 |---|---|---|
 | Scope | Entire raid | In a raid, which raid groups' alerts show. Untick groups to hide them; your own group always shows. See [Raid focus](#raid-focus). |
-| Distance warning beyond | On, 70 units | Listed players farther away than this show their distance, e.g. `(150 away)`. Untick it to turn distance warnings off. |
+| Show distance beyond | On, 70 units | Listed players farther away than this show their distance, e.g. `(150 away)`. Untick it to turn distance warnings off. |
 
-Click **Preview** while you adjust the Overlay settings to see the effect. **Restore defaults**, at the bottom of the window, puts every setting back to its default, including the alert types, sounds and class thresholds; it doesn't touch your pinned players, the overlay's position or the lock.
+Click **Preview** while you adjust the Overlay settings to see the effect. **Restore defaults**, at the bottom of the window, asks you to confirm and then resets everything: every setting, including the alert types, sounds, class thresholds and both overlays' looks, plus both overlays' positions and locks, and it removes all pinned players.
 
 ## Files
 
 Everything lives in the `EQTriage` folder:
 
 - `EQTriage.exe`: the program.
-- `position.json`: where you last dragged the overlay. Created the first time you move it.
+- `position.json`: where you last dragged the overlay and the target distance window. Created the first time you move one.
 - `pins.json`: your pinned players. Created the first time you pin someone.
 - `settings.json`: your settings. Created the first time you change one.
 - `triage.log`: a short log of connections, charm breaks, charmer hits, deaths, dropping-fast triggers and any errors, for troubleshooting. It's kept small (one older copy, `triage.log.1`, is retained) and contains only what EQ Triage saw: character names, alerts and technical messages.
@@ -219,8 +250,8 @@ Start with the status line at the top of the EQ Triage window. It checks the con
 | 🟢 Receiving data from Sebik. Join a group or raid to see other players. | Working. Only you and your pets can show until you group or raid. |
 | 🟢 Receiving data from Sebik. | Everything is working. Every connected character is listed by name; if one of your boxes is missing, its EverQuest window isn't connected yet. |
 
-- **Overlay is empty while the status is green:** that's normal when nobody is hurt. Click **Preview** to check it's on screen, or set **All classes** to warning below 100% under **Health thresholds…** for a moment to see real data flowing.
-- **Can't see the overlay at all:** check it isn't hidden (the button under *Overlay* says **Show**), then click **Re-center**.
-- **Can't drag the overlay:** untick **Lock position** under *Overlay*. With **Rows only** ticked there is no header to grab: click **Preview** and drag while the header shows.
+- **Overlay is empty while the status is green:** that's normal when nobody is hurt. Click **Preview** to check it's on screen, or set **All classes** to warning below 100% under **Configure health thresholds** for a moment to see real data flowing.
+- **Can't see the overlay at all:** check **Show window** is ticked under *Triage overlay*, then click **Re-center**.
+- **Can't drag an overlay:** untick its **Lock position** (each overlay has its own). With **Show header bar** unticked there is no header to grab: click **Preview** and drag while the header shows.
 - **Rows blink on and off:** EQ Triage treats data older than 2 seconds as gone. If you raised Zeal's `/pipedelay` above about 1500 ms, set it back down (the default is 100).
 - **Something else is wrong:** look at `triage.log` in the EQ Triage folder; the last lines usually say what happened.
