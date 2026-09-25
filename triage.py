@@ -46,6 +46,7 @@ GAUGE_TYPE = 2
 PLAYER_TYPE = 3
 RAID_TYPE = 5
 GROUP_TYPE = 6
+PLAYER_HP_GAUGE = 1
 MEMBER_GAUGES = range(11, 16)
 PLAYER_PET_GAUGE = 16
 PET_GAUGE_OFFSET = 6
@@ -336,21 +337,39 @@ def handle_members(entries, pipe_name):
                     verbose_missing = True
                 continue
             verbose_missing = False
-            name, current, maximum = entry['name'], entry['hp_current'], entry['hp_max']
-            if maximum <= 0:
+            # Your own health comes from your HP bar (handle_own_hp), in a raid too, so the two never disagree.
+            if entry['name'] == pipe_characters.get(pipe_name):
                 continue
-            members[name] = (current * 100 / maximum, now)
-            history = hp_history.setdefault(name, {}).setdefault(pipe_name, collections.deque())
-            history.append((now, current * 100 / maximum))
-            while history and now - history[0][0] > DROP_WINDOW_SECONDS:
-                history.popleft()
-            # Compared per client: another client's view can lag, and regen then looks like damage.
-            previous = hp_seen.get((pipe_name, name))
-            hp_seen[(pipe_name, name)] = (current, maximum)
-            if previous and previous[1] == maximum and current < previous[0] and is_watched(name, now):
-                if now - charmer_hits.get(name, -CHARMER_HIT_SECONDS) >= CHARMER_HIT_SECONDS:
-                    log.info(f'CHARMER HIT {name} took damage after a charm break ({previous[0]} -> {current} HP)')
-                charmer_hits[name] = now
+            record_hp(entry['name'], entry['hp_current'], entry['hp_max'], pipe_name, now)
+
+
+def handle_own_hp(gauges, character, pipe_name):
+    # Zeal's group data leaves your own character out and only the raid data has it, so your own health is read from
+    # your HP bar instead, which works in a group and without /pipeverbose.
+    value = next((g['value'] for g in gauges if g['type'] == PLAYER_HP_GAUGE), None)
+    if not character or value is None:
+        return
+    with state_lock:
+        record_hp(character, value, GAUGE_FULL, pipe_name, time.monotonic())
+
+
+def record_hp(name, current, maximum, pipe_name, now):
+    # One health reading: the current value, the history for dropping fast, and the charmer hit check. Needs
+    # state_lock.
+    if maximum <= 0:
+        return
+    members[name] = (current * 100 / maximum, now)
+    history = hp_history.setdefault(name, {}).setdefault(pipe_name, collections.deque())
+    history.append((now, current * 100 / maximum))
+    while history and now - history[0][0] > DROP_WINDOW_SECONDS:
+        history.popleft()
+    # Compared per client: another client's view can lag, and regen then looks like damage.
+    previous = hp_seen.get((pipe_name, name))
+    hp_seen[(pipe_name, name)] = (current, maximum)
+    if previous and previous[1] == maximum and current < previous[0] and is_watched(name, now):
+        if now - charmer_hits.get(name, -CHARMER_HIT_SECONDS) >= CHARMER_HIT_SECONDS:
+            log.info(f'CHARMER HIT {name} took damage after a charm break ({previous[0]} -> {current} HP)')
+        charmer_hits[name] = now
 
 
 def handle_log(entry, character):
@@ -496,7 +515,9 @@ def handle_message(message, pipe_name, watcher):
     if kind in (GROUP_TYPE, RAID_TYPE):
         handle_members(json.loads(message['data']), pipe_name)
     elif kind == GAUGE_TYPE:
-        watcher.handle_gauges(json.loads(message['data']), character)
+        gauges = json.loads(message['data'])
+        watcher.handle_gauges(gauges, character)
+        handle_own_hp(gauges, character, pipe_name)
     elif kind == PLAYER_TYPE:
         handle_player(json.loads(message['data']), pipe_name)
     elif kind == LOG_TYPE:
@@ -709,9 +730,10 @@ def target_row(settings, origin, now):
 def snapshot(settings, now):
     # What the overlay and the sounds both work from, with switched-off event types left out. Needs state_lock.
     show = settings['show']
-    # Your own characters (one per connected EverQuest window) are never listed, since you can see your own health
-    # bar; a pinned one still shows its health. Their pets are, because only their own client reports them.
-    own = set(pipe_characters.values())
+    # Your own characters (one per connected EverQuest window) are left out, since you can see your own health bar,
+    # unless Include your own character is ticked; a pinned one still shows its health. Their pets always show,
+    # because only their own client reports them.
+    own = set() if settings['include_self'] else set(pipe_characters.values())
     hp = {name: pct for name, (pct, seen) in members.items() if now - seen < STALE_SECONDS}
     member_limits = {name: limits(settings, name) for name in hp}
     dead = sorted(
@@ -1069,6 +1091,7 @@ def load_settings():
     settings['target_window'] = saved.get('target_window') is not False
     settings['triage_window'] = saved.get('triage_window') is not False
     settings['distance_warning'] = saved.get('distance_warning') is not False
+    settings['include_self'] = saved.get('include_self') is True
     rate = saved.get('drop_rate')
     valid = isinstance(rate, (int, float)) and not isinstance(rate, bool)
     settings['drop_rate'] = min(max(int(rate), DROP_RATE_RANGE[0]), DROP_RATE_RANGE[1]) if valid else DEFAULT_DROP_RATE
@@ -1682,6 +1705,11 @@ class ControlWindow(QWidget):
         scope_row = QHBoxLayout()
         scope_row.addWidget(QLabel('Scope'))
         scope_row.addWidget(self.scope_button, 1)
+        self.self_box = QCheckBox('Include your own character')
+        self.self_box.setToolTip('List your own character like any other player: low health, dropping fast and '
+                                 'death, with their sounds. Its health comes from your own HP bar.')
+        self.self_box.setChecked(overlay.settings['include_self'])
+        self.self_box.toggled.connect(self.set_include_self)
         alerts_form = QFormLayout()
         self.distance_box = QCheckBox(SETTINGS['range'][3])
         self.distance_box.setToolTip('Show how far away listed players are when they are farther than this, '
@@ -1694,6 +1722,7 @@ class ControlWindow(QWidget):
         alerts_layout.addWidget(alert_types_button)
         alerts_layout.addWidget(thresholds_button)
         alerts_layout.addLayout(scope_row)
+        alerts_layout.addWidget(self.self_box)
         alerts_layout.addLayout(alerts_form)
 
         pins_box = QGroupBox('Pinned players (always at the top of the Triage overlay)')
@@ -1809,6 +1838,10 @@ class ControlWindow(QWidget):
         self.spins['range'].setEnabled(enabled)
         self.save_and_redraw()
 
+    def set_include_self(self, enabled):
+        self.overlay.settings['include_self'] = enabled
+        self.save_and_redraw()
+
     def open_dialog(self, name, make):
         # One instance per window, created on first use and reused, so reopening shows it as it was left.
         if name not in self.dialogs:
@@ -1860,6 +1893,7 @@ class ControlWindow(QWidget):
         self.overlay.settings['thresholds'] = default_thresholds()
         self.overlay.settings.update(event_defaults({}))
         self.distance_box.setChecked(True)
+        self.self_box.setChecked(False)
         self.show_header_box.setChecked(True)
         self.target_header_box.setChecked(True)
         self.target_box.setChecked(True)

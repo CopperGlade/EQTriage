@@ -49,7 +49,7 @@ Long names are shortened with … so the health and tags always stay visible.
 
 Group and raid members show in yellow once they drop below their class's warning level and in red below its critical level: 40% / 25% for melee, 60% / 40% for hybrid casters and 75% / 50% for pure casters by default, since they die very fast. Both levels can be changed per class under **Configure health thresholds**. Your own pets and your group members' pets are included, sorted in with the players by health. Raid members' pets aren't, because Zeal doesn't send them.
 
-Your own characters are never listed, since you can see your own health bar. That covers every character logged in on one of your EverQuest windows, for their health, dropping fast, death and charmer alerts and sounds alike. Their pets still show. Pin one of your own characters to see its health anyway.
+Your own character isn't listed by default, since you can see your own health bar. Tick **Include your own character** in the Alerts section to list it like any other player: low and critical health, dropping fast and death, with their sounds. Its health comes from your own HP bar, so it works in a group as well as a raid, even without `/pipeverbose`. EQ Triage only knows your class in a raid, so in a group your own character uses the *Unknown class* levels (50% / 30% by default). Your pets always show. With the box unticked, pin your own character to see its health anyway.
 
 ### Dropping fast
 
@@ -221,13 +221,14 @@ The defaults depend on how much punishment a class can take, so sturdy classes a
 | Other | Pets | 40% | 25% |
 | Other | Unknown class | 50% | 30% |
 
-The window lists the classes under these headings. Each heading, and the **All classes** row at the top, sets every class beneath it at once; it shows — while those classes have different levels. **Reset to class defaults** puts the table above back. Pets have their own row because Zeal doesn't report a class for them, and *Unknown class* covers the moment before a player's class arrives.
+The window lists the classes under these headings. Each heading, and the **All classes** row at the top, sets every class beneath it at once; it shows — while those classes have different levels. **Reset to class defaults** puts the table above back. Pets have their own row because Zeal doesn't report a class for them, and *Unknown class* covers the moment before a player's class arrives, and your own character while you're in a group rather than a raid.
 
 The list is sorted by how close each person is to their own critical level, so a caster just above 50% comes before a warrior at 30%, who still has a comfortable margin above their 25%. Someone dropping fast is sorted by where they're heading instead.
 
 | Setting | Default | What it does |
 |---|---|---|
 | Scope | Entire raid | In a raid, which raid groups' alerts show. Untick groups to hide them; your own group always shows. See [Raid focus](#raid-focus). |
+| Include your own character | Off | Lists your own character like any other player, with its alerts and sounds. See [Warning and critical health](#warning-and-critical-health). |
 | Show distance beyond | On, 70 units | Listed players farther away than this show their distance, e.g. `(150 away)`. Untick it to turn distance warnings off. |
 
 Click an overlay's **Preview** while you adjust its **Other settings** to see the effect. **Restore defaults**, at the bottom of the window, asks you to confirm and then resets everything: every setting, including the alert types, sounds, class thresholds and both overlays' looks, plus both overlays' positions and locks, and it removes all pinned players.

@@ -249,11 +249,45 @@ def test_pets_are_listed_with_players_and_cannot_be_pinned(settings):
 
 def test_own_characters_are_never_listed_unless_pinned(clock, settings):
     triage.pipe_characters[PIPE] = 'Sebik'
-    triage.handle_members([member('Sebik', 15), member('Mera', 15)], PIPE)
+    triage.handle_members([member('Mera', 15)], PIPE)
+    triage.handle_own_hp([gauge(triage.PLAYER_HP_GAUGE, '', 150)], 'Sebik', PIPE)
     triage.deaths['Sebik'] = clock.now
     assert names(triage.alert_rows(settings, [])) == [('', 'Mera', ' 15%')]
     assert names(triage.alert_rows(settings, ['Sebik']))[0] == ('', 'Sebik', ' 15%')
     assert triage.current_events(settings) == {('critical', 'Mera')}
+
+
+def test_include_your_own_character_lists_and_sounds_it(clock, settings):
+    settings['include_self'] = True
+    triage.pipe_characters[PIPE] = 'Sebik'
+    triage.handle_own_hp([gauge(triage.PLAYER_HP_GAUGE, '', 150)], 'Sebik', PIPE)
+    assert names(triage.alert_rows(settings, [])) == [('', 'Sebik', ' 15%')]
+    assert triage.current_events(settings) == {('critical', 'Sebik')}
+    triage.deaths['Sebik'] = clock.now
+    assert names(triage.alert_rows(settings, [])) == [('DEAD ', 'Sebik', '')]
+
+
+def test_own_health_comes_from_the_hp_bar_not_the_raid_entry():
+    triage.pipe_characters[PIPE] = 'Sebik'
+    triage.handle_members([member('Sebik', 90, group='1'), member('Mera', 90, group='1')], PIPE)
+    assert 'Sebik' not in triage.members and triage.members['Mera'][0] == 90
+    assert not triage.verbose_missing
+    triage.handle_own_hp([gauge(triage.PLAYER_HP_GAUGE, '', 300), gauge(11, 'Mera', 900)], 'Sebik', PIPE)
+    assert triage.members['Sebik'][0] == 30
+
+
+def test_own_hp_bar_arrives_with_the_gauges_in_a_group(settings):
+    watcher = triage.PetWatcher(PIPE, False)
+    triage.handle_message(json.loads(message(triage.GAUGE_TYPE, [gauge(triage.PLAYER_HP_GAUGE, '', 450)])), PIPE,
+                          watcher)
+    assert triage.members['Sebik'][0] == 45
+    assert names(triage.alert_rows(settings, ['Sebik'])) == [('', 'Sebik', ' 45%')]
+
+
+def test_no_own_health_without_a_character_or_hp_bar():
+    triage.handle_own_hp([gauge(triage.PLAYER_HP_GAUGE, '', 300)], '', PIPE)
+    triage.handle_own_hp([gauge(11, 'Mera', 900)], 'Sebik', PIPE)
+    assert triage.members == {}
 
 
 def test_own_pet_still_shows(settings):
@@ -659,6 +693,7 @@ def test_defaults_when_nothing_is_saved(settings):
     assert settings['thresholds']['Pets'] == {'list': 40, 'red': 25}
     assert settings['drop_rate'] == 15
     assert settings['hidden_groups'] == [] and not settings['locked'] and settings['distance_warning']
+    assert settings['include_self'] is False
 
 
 def test_saved_values_are_clamped_and_bad_types_ignored(tmp_path):
@@ -841,6 +876,17 @@ def test_show_header_setting_is_saved_and_on_by_default(tmp_path, settings):
 
 def make_control(settings):
     return triage.ControlWindow(triage.TriageWindow(settings), triage.TargetWindow(settings))
+
+
+def test_include_your_own_character_is_saved_off_by_default_and_restored(qapp, settings, tmp_path):
+    control = make_control(settings)
+    assert not control.self_box.isChecked()
+    control.self_box.setChecked(True)
+    assert settings['include_self'] is True and triage.load_settings()['include_self'] is True
+    (tmp_path / 'settings.json').write_text(json.dumps({'include_self': 'yes'}))
+    assert triage.load_settings()['include_self'] is False
+    control.apply_defaults()
+    assert settings['include_self'] is False and not control.self_box.isChecked()
 
 
 def test_configure_windows_hold_the_spins_and_apply_live(qapp, settings):
