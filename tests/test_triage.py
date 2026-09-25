@@ -164,14 +164,58 @@ def test_rows_follow_the_documented_order(clock, settings):
     triage.charm_breaks['Mera'] = ('Quillmane', clock.now)
     triage.deaths['Sebik'] = clock.now
     rows = names(triage.alert_rows(settings, []))
-    assert rows == [(triage.CHARM_BREAK_PREFIX, 'Mera', ''), ('DEAD ', 'Sebik', '')]
+    assert rows == [
+        (triage.CHARM_BREAK_PREFIX, 'Mera', ''), (triage.PET_ROW_PREFIX, 'Quillmane', ''), ('DEAD ', 'Sebik', ''),
+    ]
 
 
 def test_charmer_hit_shows_before_charm_break_and_carries_health(clock, settings):
     triage.handle_members([member('Mera', 80)], PIPE)
     triage.charm_breaks['Mera'] = ('Quillmane', clock.now)
     triage.charmer_hits['Mera'] = clock.now
-    assert names(triage.alert_rows(settings, [])) == [(triage.CHARMER_HIT_PREFIX, 'Mera', ' 80%')]
+    assert names(triage.alert_rows(settings, [])) == [
+        (triage.CHARMER_HIT_PREFIX, 'Mera', ' 80%'), (triage.PET_ROW_PREFIX, 'Quillmane', ''),
+    ]
+
+
+def test_loose_pet_row_follows_every_charm_row_including_pinned(clock, settings):
+    triage.handle_members([member('Mera', 80), member('Sebik', 90)], PIPE)
+    triage.charm_breaks['Mera'] = ('a_Soriz_Slave00', clock.now)
+    triage.charm_breaks['Sebik'] = ('Quillmane', clock.now)
+    rows = [row for row in triage.alert_rows(settings, ['Sebik']) if row[1]]
+    assert rows == [
+        (triage.CHARM_BREAK_PREFIX, 'Sebik', '', triage.CHARMER_COLOR, 'Sebik'),
+        (triage.PET_ROW_PREFIX, 'Quillmane', '', triage.CHARMER_COLOR, None),
+        (triage.CHARM_BREAK_PREFIX, 'Mera', '', triage.CHARMER_COLOR, 'Mera'),
+        (triage.PET_ROW_PREFIX, 'a Soriz Slave', '', triage.CHARMER_COLOR, None),
+    ]
+
+
+def test_no_pet_row_without_a_pet_name(clock, settings):
+    triage.handle_members([member('Mera', 80)], PIPE)
+    triage.charm_breaks['Mera'] = ('', clock.now)
+    assert names(triage.alert_rows(settings, [])) == [(triage.CHARM_BREAK_PREFIX, 'Mera', '')]
+
+
+def test_pet_rows_count_toward_the_row_limit(clock, settings):
+    settings['rows'] = 3
+    triage.handle_members([member('Mera', 80), member('Sebik', 80)], PIPE)
+    triage.charm_breaks['Mera'] = ('Quillmane', clock.now)
+    triage.charm_breaks['Sebik'] = ('a Soriz Slave', clock.now)
+    assert names(triage.alert_rows(settings, [])) == [
+        (triage.CHARM_BREAK_PREFIX, 'Mera', ''), (triage.PET_ROW_PREFIX, 'Quillmane', ''),
+        (triage.CHARM_BREAK_PREFIX, 'Sebik', ''),
+    ]
+
+
+@pytest.mark.parametrize('raw, shown', [
+    ('A Soriz Slave', 'A Soriz Slave'),
+    ('a_Shissar_Defiler00', 'a Shissar Defiler'),
+    (' Quillmane ', 'Quillmane'),
+    ('', ''),
+])
+def test_clean_pet_name(raw, shown):
+    assert triage.clean_pet_name(raw) == shown
 
 
 def test_low_health_sorts_by_distance_to_each_own_critical_level(settings):
@@ -260,7 +304,23 @@ def test_dead_and_charm_break_rows_are_never_tagged(clock, settings):
     assert names(triage.alert_rows(settings, [], PIPE)) == [('DEAD ', 'Mera', '')]
     del triage.deaths['Mera']
     triage.charm_breaks['Mera'] = ('Quillmane', clock.now)
-    assert names(triage.alert_rows(settings, [], PIPE)) == [(triage.CHARM_BREAK_PREFIX, 'Mera', '')]
+    assert names(triage.alert_rows(settings, [], PIPE)) == [
+        (triage.CHARM_BREAK_PREFIX, 'Mera', ''), (triage.PET_ROW_PREFIX, 'Quillmane', ''),
+    ]
+
+
+def test_pet_row_is_bare_while_its_charmer_hit_row_is_marked_and_tagged(clock, settings):
+    triage.own_locations[PIPE] = ((0, 0, 0), clock.now)
+    triage.member_locations[(PIPE, 'Mera')] = ((145, 0, 0), clock.now)
+    fall('Mera', (100, 90, 80), clock)
+    triage.charm_breaks['Mera'] = ('Quillmane', clock.now)
+    triage.charmer_hits['Mera'] = clock.now
+    triage.update_dropping(settings)
+    # The marker comes before the distance, the same order as the preview's sample row.
+    assert names(triage.alert_rows(settings, [], PIPE)) == [
+        (triage.CHARMER_HIT_PREFIX, 'Mera', f' 80%{triage.DROP_MARKER} (150 away)'),
+        (triage.PET_ROW_PREFIX, 'Quillmane', ''),
+    ]
 
 
 def test_with_distance_rounds_halves_up():
@@ -729,9 +789,11 @@ def test_feed_status_messages(clock, monkeypatch):
 
 def test_preview_shows_one_row_of_each_kind():
     suffixes = [suffix for _, _, suffix, _, _ in triage.SAMPLE_ROWS]
-    assert any(suffix.endswith(triage.DROP_MARKER) for suffix in suffixes)
-    assert any('away' in suffix for suffix in suffixes) and any('pet' in suffix for suffix in suffixes)
-    assert all(name == 'Sebik' for _, name, _, _, _ in triage.SAMPLE_ROWS)
+    assert f'{triage.DROP_MARKER} (150 away)' in ''.join(suffixes)
+    assert any('pet' in suffix for suffix in suffixes)
+    assert [prefix for prefix, _, _, _, _ in triage.SAMPLE_ROWS].count(triage.PET_ROW_PREFIX) == 1
+    assert all(name == 'Sebik' for prefix, name, _, _, _ in triage.SAMPLE_ROWS if prefix != triage.PET_ROW_PREFIX)
+    assert len(triage.SAMPLE_ROWS) == triage.SETTINGS['rows'][0], 'the preview fills the default row count'
 
 
 def test_overlay_size_follows_the_settings_and_renders(qapp, settings):

@@ -61,6 +61,9 @@ MIN_BREAK_HP = 10
 DISTANCE_STEP = 10
 CHARM_BREAK_PREFIX = 'CHARM BREAK '
 CHARMER_HIT_PREFIX = 'CHARMER HIT '
+# Rows with these prefixes are followed by the loose pet's name, indented, so an enchanter knows what to stun.
+CHARMER_PREFIXES = (CHARM_BREAK_PREFIX, CHARMER_HIT_PREFIX)
+PET_ROW_PREFIX = '  '
 UNTAGGED_PREFIXES = ('DEAD ', CHARM_BREAK_PREFIX)
 DROP_MARKED_PREFIXES = ('', CHARMER_HIT_PREFIX)
 SCAN_SECONDS = 5.0
@@ -92,16 +95,17 @@ STALE_COLOR = '#8a8a8a'
 EMPTY_ROW = ('', '', '', LOW_HP_COLOR, None)
 VERBOSE_ROW = ('Type ', '/pipeverbose on', '', STALE_COLOR, None)
 PREVIEW_SECONDS = 15.0
-# One of each row type, so text size, width and position can be judged before any real data arrives.
+# One of each row type, so text size, width and position can be judged before any real data arrives. They fill the
+# default row count, so the dropping marker and the distance share a row, in the order alert_rows adds them.
 SAMPLE_ROWS = [
     ('', 'Sebik', ' 95%', PINNED_COLOR, None),
     (CHARMER_HIT_PREFIX, 'Sebik', ' 80%', CHARMER_COLOR, None),
     (CHARM_BREAK_PREFIX, 'Sebik', '', CHARMER_COLOR, None),
+    (PET_ROW_PREFIX, 'A Soriz Slave', '', CHARMER_COLOR, None),
     ('DEAD ', 'Sebik', '', DEATH_COLOR, None),
     ('', 'Sebik', ' 22%', CRITICAL_HP_COLOR, None),
-    ('', 'Sebik', ' 70% \u25bc', LOW_HP_COLOR, None),
     ('', 'Sebik', ' pet 41%', LOW_HP_COLOR, None),
-    ('', 'Sebik', ' 38% (150 away)', LOW_HP_COLOR, None),
+    ('', 'Sebik', ' 38% \u25bc (150 away)', LOW_HP_COLOR, None),
 ]
 # Dropping fast: HP lost per second, measured over a short window and held briefly so the marker doesn't flicker.
 # The loss must come from at least DROP_MIN_DROPS separate readings going down, so one big hit or a self-damaging
@@ -367,6 +371,11 @@ def handle_log(entry, character):
         deaths[name] = now
 
 
+def clean_pet_name(pet_name):
+    # Pet bars can carry the spawn's raw name (a_Shissar_Defiler00); the name shown in game has spaces and no number.
+    return re.sub(r'\d+$', '', pet_name.replace('_', ' ').strip())
+
+
 def could_be_charm(owner, pet_name):
     # A vanished pet only counts as a charm break if its owner is a class that charms at high level and the pet
     # isn't a summoned one. The Project Quarm server names summoned pets either with a generated name matching
@@ -377,7 +386,7 @@ def could_be_charm(owner, pet_name):
         owner_class = member_classes.get(owner)
     if owner_class is not None and CLASSES[owner_class] not in CHARM_CLASSES:
         return False
-    name = re.sub(r'\d+$', '', pet_name.replace('_', ' ').strip())
+    name = clean_pet_name(pet_name)
     if not name:
         return True
     return not SUMMONED_PET_NAME.match(name) and not name.lower().startswith(f'{owner.lower()}`s ')
@@ -646,6 +655,18 @@ def distance_to(name, origin, now):
     return math.dist(own[0], theirs[0])
 
 
+def with_loose_pets(rows, loose_pets):
+    # A charm break or charmer hit row is followed by the loose pet's name on its own indented row: the owner is who
+    # needs healing, the pet is what an enchanter must stun. The pet row has no pin, marker or distance.
+    out = []
+    for row in rows:
+        out.append(row)
+        pet = loose_pets.get(row[4])
+        if row[0] in CHARMER_PREFIXES and pet:
+            out.append((PET_ROW_PREFIX, pet, '', CHARMER_COLOR, None))
+    return out
+
+
 def with_drop_marker(row):
     prefix, name, suffix, color, key = row
     return prefix, name, suffix + DROP_MARKER, color, key
@@ -755,12 +776,15 @@ def alert_rows(settings, pinned, origin=None):
         far = {name: d for name, d in distances.items() if d is not None and d > settings['range']}
         hp, member_limits, dead, charmers_hit, breaks, low, low_pets, dropping = snapshot(settings, now)
         keep = focus_filter(settings, origin, now)
+        loose_pets = {owner: clean_pet_name(pet) for owner, (pet, _) in charm_breaks.items()}
     # Pinned players are shown whatever the Scope setting; everything else follows it.
     dead, charmers_hit, breaks, low, low_pets = apply_focus(keep, dead, charmers_hit, breaks, low, low_pets)
     # Each row is (prefix, name, suffix, color, pin key). Only the name is shortened when a row is too wide,
     # and the pin key is the player a click on the row's pin toggles (None for pets and empty rows).
     flagged = [name for name in charmers_hit + breaks + dead if name not in pinned]
-    rows = [status_row(name, hp, member_limits, dead, charmers_hit, breaks) for name in pinned + flagged]
+    rows = with_loose_pets(
+        [status_row(name, hp, member_limits, dead, charmers_hit, breaks) for name in pinned + flagged], loose_pets
+    )
     shown = set(pinned) | set(flagged)
     players = [(margin, pct, name, '', red_hp, name) for margin, pct, name, _, red_hp in low if name not in shown]
     pets = [(margin, pct, owner, ' pet', red_hp, None) for margin, pct, owner, _, red_hp in low_pets]

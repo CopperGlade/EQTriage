@@ -22,7 +22,7 @@ EQ Triage sits on top of EverQuest and lists the people who need attention: play
 The overlay has 8 rows by default (adjustable from 3 to 25 under **Other settings** in the *Triage overlay* section). Rows appear in this order:
 
 1. **Pinned players**, in the order you pinned them.
-2. **Charmer alerts** (`CHARMER HIT`, then `CHARM BREAK`).
+2. **Charmer alerts** (`CHARMER HIT`, then `CHARM BREAK`), each followed by the name of the pet that broke free on an indented row.
 3. **Deaths.**
 4. **Everyone else below their warning level** (set per class; 40–75% by default) or **dropping fast**, players and pets together, most urgent first.
 
@@ -33,6 +33,7 @@ The overlay has 8 rows by default (adjustable from 3 to 25 under **Other setting
 | `Sebik pet 40%` | Yellow | Sebik's pet below the pets' warning level, 40% by default (red below the 25% critical level). |
 | `CHARM BREAK Sebik` | Red | Sebik's charmed pet just broke free. Shown for 6 seconds. |
 | `CHARMER HIT Sebik 80%` | Red | Sebik is taking damage after a charm break, probably from the freed pet. This is the most urgent row. |
+| `A Soriz Slave`, indented | Red | The pet that broke free, on the row under each `CHARM BREAK` and `CHARMER HIT`: the mob to stun or re-charm. It takes up one of the overlay's rows. |
 | `DEAD Sebik` | Purple | Sebik died. Shown for 10 seconds. |
 | `Sebik 70% ▼` | Yellow | Sebik is losing health fast (more than 15% per second over at least two hits by default), listed even above their warning level. |
 | `Sebik 38% (150 away)` | Yellow | A distance warning: 150 units from you, farther than the distance warning setting (70 units by default). |
@@ -68,6 +69,15 @@ Pinned players always show, whatever the setting, and so do ungrouped raid membe
 
 When a group member's pet health bar disappears while the pet still had more than 10% health, EQ Triage reports `CHARM BREAK name`. A bar that vanishes at low health counts as the pet dying and is ignored. This works for your group only, not the entire raid.
 
+The row under it, indented, names the pet that broke free, so an enchanter knows which mob to stun:
+
+```
+CHARM BREAK Sebik
+  A Soriz Slave
+```
+
+The pet's row stays under the charmer's row when it turns into `CHARMER HIT`, since that pet is usually the one doing the hitting.
+
 To avoid false alarms, a lost pet only counts as a charm break when:
 
 - the owner is an **Enchanter, Necromancer or Bard**, the classes that charm at high level. A magician dismissing a pet, for example, is ignored.
@@ -97,7 +107,7 @@ Distance is measured from whichever EverQuest window is active, so it follows yo
 | Remedy, Ethereal Remedy | 200 |
 | Word of Redemption (group) | 70 around you |
 
-Pets, `DEAD` rows and `CHARM BREAK` rows never show a distance. To turn distance warnings off, untick **Show distance beyond** in the Alerts section.
+Pets, the rows naming a loose pet, `DEAD` rows and `CHARM BREAK` rows never show a distance. To turn distance warnings off, untick **Show distance beyond** in the Alerts section.
 
 ### Target distance window
 
