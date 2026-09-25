@@ -2,7 +2,6 @@
 
 import json
 import logging
-import math
 import types
 
 import pytest
@@ -290,6 +289,35 @@ def test_no_own_health_without_a_character_or_hp_bar():
     assert triage.members == {}
 
 
+def label(kind, value):
+    return {'type': kind, 'value': value, 'meta': {}}
+
+
+def test_own_class_comes_from_the_class_label(settings):
+    # Outside a raid only the Class label knows your class: a Necromancer at 60% is in the pure caster warning band,
+    # where the Unknown class levels (50/30) would not list it at all.
+    settings['include_self'] = True
+    triage.pipe_characters[PIPE] = 'Sebik'
+    labels = [label(1, 'Sebik'), label(triage.CLASS_LABEL, 'Necromancer')]
+    triage.handle_message(json.loads(message(triage.LABEL_TYPE, labels)), PIPE, triage.PetWatcher(PIPE, False))
+    assert triage.member_classes['Sebik'] == 11
+    triage.handle_own_hp([gauge(triage.PLAYER_HP_GAUGE, '', 600)], 'Sebik', PIPE)
+    rows = triage.alert_rows(settings, [])
+    assert names(rows) == [('', 'Sebik', ' 60%')] and rows[0][3] == triage.LOW_HP_COLOR
+
+
+def test_class_label_ignores_case_and_spaces_and_logs_other_text_once(caplog):
+    triage.handle_labels([label(triage.CLASS_LABEL, 'Shadowknight')], 'Sebik')
+    assert triage.member_classes['Sebik'] == 5
+    with caplog.at_level(logging.WARNING, logger='triage'):
+        for _ in range(3):
+            triage.handle_labels([label(triage.CLASS_LABEL, 'Warlock')], 'Sebik')
+        triage.handle_labels([label(triage.CLASS_LABEL, '')], 'Sebik')
+        triage.handle_labels([label(triage.CLASS_LABEL, 'Wizard')], '')
+    assert triage.member_classes == {'Sebik': 5}, 'other text keeps the class already known'
+    assert len(caplog.records) == 1
+
+
 def test_own_pet_still_shows(settings):
     triage.pipe_characters[PIPE] = 'Sebik'
     triage.pet_hp['Sebik'] = (20, triage.time.monotonic())
@@ -310,14 +338,25 @@ def test_pipeverbose_reminder_row_comes_first(monkeypatch, settings):
 # Distance
 
 
-def test_distance_tags_far_players_and_other_zones(settings):
+def test_distance_tags_far_players_only(settings):
     now = triage.time.monotonic()
     triage.own_locations[PIPE] = ((0, 0, 0), now)
     triage.member_locations[(PIPE, 'Mera')] = ((145, 0, 0), now)
     triage.handle_members([member('Mera', 30), member('Sebik', 30)], PIPE)
     rows = names(triage.alert_rows(settings, [], PIPE))
     assert ('', 'Mera', ' 30% (150 away)') in rows
-    assert ('', 'Sebik', ' 30% (other zone)') in rows
+    assert ('', 'Sebik', ' 30%') in rows, 'no position means no distance, never another zone'
+
+
+def test_own_character_has_no_distance_solo_or_in_a_group(settings):
+    # Zeal's group list leaves you out, so your own character never has a member position.
+    settings['include_self'] = True
+    triage.pipe_characters[PIPE] = 'Sebik'
+    triage.handle_player({'location': {'x': 0, 'y': 0, 'z': 0}}, PIPE)
+    triage.handle_own_hp([gauge(triage.PLAYER_HP_GAUGE, '', 300)], 'Sebik', PIPE)
+    assert names(triage.alert_rows(settings, [], PIPE)) == [('', 'Sebik', ' 30%')]
+    triage.handle_members([member('Mera', 90, loc={'x': 500, 'y': 0, 'z': 0})], PIPE)
+    assert names(triage.alert_rows(settings, [], PIPE)) == [('', 'Sebik', ' 30%')]
 
 
 def test_no_distance_without_own_position_or_when_switched_off(settings):
@@ -361,7 +400,6 @@ def test_with_distance_rounds_halves_up():
     row = ('', 'Mera', ' 30%', triage.LOW_HP_COLOR, 'Mera')
     assert triage.with_distance(row, 74.9)[2] == ' 30% (70 away)'
     assert triage.with_distance(row, 75)[2] == ' 30% (80 away)'
-    assert triage.with_distance(row, math.inf)[2] == ' 30% (other zone)'
 
 
 # Target distance
@@ -427,7 +465,7 @@ def test_distance_cutoffs_load_in_order(tmp_path):
 
 
 def test_target_member_without_a_position_has_no_distance(clock, settings):
-    # Someone in another zone can't be targeted, so a member without a position just has no distance.
+    # Zeal sends a spawn id and a position together, so a member without a fresh position has no distance.
     triage.handle_members([{'name': 'Mera', 'spawn_id': 42, 'loc': {'x': 30, 'y': 40, 'z': 0}}], PIPE)
     clock.advance(triage.STALE_SECONDS)
     triage.handle_members([{'name': 'Mera', 'spawn_id': 42}], PIPE)

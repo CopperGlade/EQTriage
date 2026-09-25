@@ -42,11 +42,13 @@ MB_ICONINFORMATION = 0x40
 PIPE_DIR = '\\\\.\\pipe\\'
 PIPE_PREFIX = 'zeal_'
 LOG_TYPE = 0
+LABEL_TYPE = 1
 GAUGE_TYPE = 2
 PLAYER_TYPE = 3
 RAID_TYPE = 5
 GROUP_TYPE = 6
 PLAYER_HP_GAUGE = 1
+CLASS_LABEL = 3
 MEMBER_GAUGES = range(11, 16)
 PLAYER_PET_GAUGE = 16
 PET_GAUGE_OFFSET = 6
@@ -199,6 +201,14 @@ CLASSES = {
     1: 'Warrior', 2: 'Cleric', 3: 'Paladin', 4: 'Ranger', 5: 'Shadow Knight', 6: 'Druid', 7: 'Monk', 8: 'Bard',
     9: 'Rogue', 10: 'Shaman', 11: 'Necromancer', 12: 'Wizard', 13: 'Magician', 14: 'Enchanter', 15: 'Beastlord',
 }
+
+
+def class_key(text):
+    # Class names compared without case or spaces, so "Shadow Knight" and "Shadowknight" match.
+    return text.replace(' ', '').lower()
+
+
+CLASS_NUMBERS = {class_key(name): number for number, name in CLASSES.items()}
 # Health thresholds are set per class. Pets have no class in Zeal's data, and a player's class can be unknown
 # for a moment while data arrives, so both get their own entry.
 # The only classes that charm at high level; other classes losing a pet is never a charm break.
@@ -278,6 +288,7 @@ hp_seen = {}
 hp_history = {}
 dropping_until = {}
 member_classes = {}
+unknown_class_labels = set()
 raid_groups = {}
 connected = set()
 pipe_characters = {}
@@ -352,6 +363,21 @@ def handle_own_hp(gauges, character, pipe_name):
     with state_lock:
         record_hp(character, value, GAUGE_FULL, pipe_name, time.monotonic())
 
+
+def handle_labels(labels, character):
+    # Your own class, from the Class label your inventory window shows. Zeal's group list leaves you out and only
+    # the raid list has your class, so without this your own character would use the Unknown class levels outside
+    # a raid. Text that isn't a class name is logged once, in case the game shows something else there.
+    text = next((str(label.get('value', '')).strip() for label in labels if label.get('type') == CLASS_LABEL), '')
+    if not character or not text:
+        return
+    number = CLASS_NUMBERS.get(class_key(text))
+    with state_lock:
+        if number:
+            member_classes[character] = number
+        elif text not in unknown_class_labels:
+            unknown_class_labels.add(text)
+            log.warning(f'Class label {text!r} for {character} is not a class name; its class is only known in a raid')
 
 def record_hp(name, current, maximum, pipe_name, now):
     # One health reading: the current value, the history for dropping fast, and the charmer hit check. Needs
@@ -520,6 +546,8 @@ def handle_message(message, pipe_name, watcher):
         handle_own_hp(gauges, character, pipe_name)
     elif kind == PLAYER_TYPE:
         handle_player(json.loads(message['data']), pipe_name)
+    elif kind == LABEL_TYPE:
+        handle_labels(json.loads(message['data']), character)
     elif kind == LOG_TYPE:
         handle_log(json.loads(message['data']), character)
 
@@ -665,14 +693,16 @@ def status_row(name, hp, member_limits, dead, charmers_hit, breaks):
 
 
 def distance_to(name, origin, now):
-    # Straight-line distance from the active EQ character, math.inf when the player is in another zone
-    # (no position in that client), or None when your own position isn't known yet.
+    # Straight-line distance from the active EQ character, or None when either position isn't known. Zeal sends a
+    # member's health and position together, only while they are in the zone, so a listed player without a position
+    # is never elsewhere: it is your own character (the group list leaves you out) or someone only another EQ window
+    # reports. There is no distance to show then.
     own = own_locations.get(origin)
     if not own or now - own[1] >= STALE_SECONDS:
         return None
     theirs = member_locations.get((origin, name))
     if not theirs or now - theirs[1] >= STALE_SECONDS:
-        return math.inf
+        return None
     return math.dist(own[0], theirs[0])
 
 
@@ -695,8 +725,6 @@ def with_drop_marker(row):
 
 def with_distance(row, distance):
     prefix, name, suffix, color, key = row
-    if distance == math.inf:
-        return prefix, name, suffix + ' (other zone)', color, key
     # Rounded to the nearest step so the number doesn't flicker as people move. Halves round up; Python's
     # round() would round them to even.
     rounded = math.floor(distance / DISTANCE_STEP + 0.5) * DISTANCE_STEP
@@ -707,8 +735,8 @@ def target_row(settings, origin, now):
     # The Distance overlay's one row for the active client's selected target: the bare distance ("450", the header
     # says what it is) when the target is a group or raid member, colored by the target_near/target_far cutoffs
     # (white, yellow, red). Anything else (a mob, a pet, a player outside the group and raid) has no position in the
-    # feed, so it shows "--", as does a member while your own position is unknown. A member in another zone can't be
-    # targeted, so a missing position counts as no distance too. No target means an empty row. Needs state_lock.
+    # feed, so it shows "--", as does a member while your own position is unknown. No target means an empty row.
+    # Needs state_lock.
     spawn = targets.get(origin)
     if not spawn or now - spawn[1] >= STALE_SECONDS or spawn[0] is None:
         return EMPTY_ROW
@@ -716,7 +744,7 @@ def target_row(settings, origin, now):
     member = next((name for (pipe, name), (spawn_id, seen) in member_spawns.items()
                    if pipe == origin and spawn_id == target_id and now - seen < STALE_SECONDS), None)
     distance = distance_to(member, origin, now) if member else None
-    if distance is None or distance == math.inf:
+    if distance is None:
         return NO_DISTANCE_ROW
     if distance <= settings['target_near']:
         color = PINNED_COLOR
@@ -1713,7 +1741,7 @@ class ControlWindow(QWidget):
         alerts_form = QFormLayout()
         self.distance_box = QCheckBox(SETTINGS['range'][3])
         self.distance_box.setToolTip('Show how far away listed players are when they are farther than this, '
-                                     'e.g. (150 away), or (other zone).')
+                                     'e.g. (150 away).')
         self.distance_box.setChecked(overlay.settings['distance_warning'])
         self.distance_box.toggled.connect(self.set_distance_warning)
         alerts_form.addRow(self.distance_box, self.make_setting_spin('range'))

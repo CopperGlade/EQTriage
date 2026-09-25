@@ -37,7 +37,6 @@ The overlay has 8 rows by default (adjustable from 3 to 25 under **Other setting
 | `DEAD Sebik` | Purple | Sebik died. Shown for 10 seconds. |
 | `Sebik 70% ▼` | Yellow | Sebik is losing health fast (more than 15% per second over at least two hits by default), listed even above their warning level. |
 | `Sebik 38% (150 away)` | Yellow | A distance warning: 150 units from you, farther than the distance warning setting (70 units by default). |
-| `Sebik 38% (other zone)` | Yellow | A distance warning for someone in a different zone. |
 | `Sebik 95%` | White | A pinned player at healthy HP. |
 | `Sebik --` | Grey | A pinned player with no data right now (zoned, or not in your group or raid). |
 
@@ -49,7 +48,7 @@ Long names are shortened with … so the health and tags always stay visible.
 
 Group and raid members show in yellow once they drop below their class's warning level and in red below its critical level: 40% / 25% for melee, 60% / 40% for hybrid casters and 75% / 50% for pure casters by default, since they die very fast. Both levels can be changed per class under **Configure health thresholds**. Your own pets and your group members' pets are included, sorted in with the players by health. Raid members' pets aren't, because Zeal doesn't send them.
 
-Your own character isn't listed by default, since you can see your own health bar. Tick **Include your own character** in the Alerts section to list it like any other player: low and critical health, dropping fast and death, with their sounds. Its health comes from your own HP bar, so it works in a group as well as a raid, even without `/pipeverbose`. EQ Triage only knows your class in a raid, so in a group your own character uses the *Unknown class* levels (50% / 30% by default). Your pets always show. With the box unticked, pin your own character to see its health anyway.
+Your own character isn't listed by default, since you can see your own health bar. Tick **Include your own character** in the Alerts section to list it like any other player: low and critical health, dropping fast and death, with their sounds. Its health comes from your own HP bar, so it works in a group as well as a raid, even without `/pipeverbose`. Your class is read from the game too, so your own character uses its class's levels whether you're solo, grouped or raiding. It never gets a distance tag. Your pets always show. With the box unticked, pin your own character to see its health anyway.
 
 ### Dropping fast
 
@@ -97,7 +96,7 @@ When the game reports a group or raid member slain (or *You have been slain* / *
 
 ### Distance warnings
 
-Listed players farther from your character than the **Show distance beyond** setting (70 units by default) show how far away they are, e.g. `Sebik 38% (150 away)`, or `(other zone)`. That tells you before you start a long heal whether it can land, and whether they need to take a step closer or are across the zone. The distance is rounded to the nearest 10 so it doesn't flicker as people move.
+Listed players farther from your character than the **Show distance beyond** setting (70 units by default) show how far away they are, e.g. `Sebik 38% (150 away)`. That tells you before you start a long heal whether it can land, and whether they need to take a step closer or are across the zone. The distance is rounded to the nearest 10 so it doesn't flicker as people move.
 
 Distance is measured from whichever EverQuest window is active, so it follows you when you switch characters. The 70-unit default warns a little before the edge of the main cleric heals:
 
@@ -221,7 +220,7 @@ The defaults depend on how much punishment a class can take, so sturdy classes a
 | Other | Pets | 40% | 25% |
 | Other | Unknown class | 50% | 30% |
 
-The window lists the classes under these headings. Each heading, and the **All classes** row at the top, sets every class beneath it at once; it shows — while those classes have different levels. **Reset to class defaults** puts the table above back. Pets have their own row because Zeal doesn't report a class for them, and *Unknown class* covers the moment before a player's class arrives, and your own character while you're in a group rather than a raid.
+The window lists the classes under these headings. Each heading, and the **All classes** row at the top, sets every class beneath it at once; it shows — while those classes have different levels. **Reset to class defaults** puts the table above back. Pets have their own row because Zeal doesn't report a class for them, and *Unknown class* covers the moment before a player's class arrives.
 
 The list is sorted by how close each person is to their own critical level, so a caster just above 50% comes before a warrior at 30%, who still has a comfortable margin above their 25%. Someone dropping fast is sorted by where they're heading instead.
 
