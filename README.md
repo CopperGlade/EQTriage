@@ -11,7 +11,7 @@ EQ Triage sits on top of EverQuest and lists the people who need attention: play
 3. **Install EQ Triage.** Download `EQTriage-vX.Y.Z.zip` from the [latest release](https://github.com/CopperGlade/EQTriage/releases/latest) and extract it into your EverQuest folder, next to `eqgame.exe`, so you end up with, for example, `C:\QUARM\EQTriage\EQTriage.exe`.
 
    Unlike Zeal, EQ Triage is a separate program rather than a plugin, so it works from any folder. Keeping it in its own folder inside EverQuest just keeps everything together. The folder must be one you can write to, because EQ Triage saves its settings there, so avoid `Program Files`.
-4. **Start EQ Triage.** Run `EQTriage.exe`. A desktop shortcut to it is handy. It can start before or after EverQuest, and it connects to every EverQuest window you have open, so multiboxing needs no extra setup.
+4. **Start EQ Triage.** Run `EQTriage.exe`. A desktop shortcut to it is handy. It can start before or after EverQuest, and it connects to the game on its own.
 5. **Place the overlay.** Click **Preview** in the EQ Triage window to fill the overlay with sample rows for 15 seconds, then drag it by the *Triage* header to wherever you want it. The position is remembered. Tick **Lock position** once it's where you want it, so a stray click can't move it.
 
 > [!NOTE]
@@ -60,7 +60,7 @@ Someone dropping fast is sorted by where they will be in a couple of seconds at 
 
 In a raid, the **Scope** setting in the Alerts section decides whose alerts show. By default it's **Entire raid**, so everyone shows. Click it to select the groups you want to monitor. All 12 are selected to begin with, so untick any you don't need, for example groups another healer covers. The setting then reads e.g. *All but groups 7, 8*.
 
-Your own raid group always shows, even when its number is unticked. It's the group of the character in the active EverQuest window, so it switches with you between boxes, and you keep your group's alerts if the raid leader moves you into a group you hid. Untick every group to monitor only your own (*Your group only*).
+Your own raid group always shows, even when its number is unticked, so you keep your group's alerts if the raid leader moves you into a group you hid. Untick every group to monitor only your own (*Your group only*).
 
 Pinned players always show, whatever the setting, and so do ungrouped raid members and anyone EQ Triage has no raid group for yet. Nothing is hidden outside a raid, or until EQ Triage knows your own group.
 
@@ -246,11 +246,11 @@ Start with the status line at the top of the EQ Triage window. It checks the con
 |---|---|
 | ⚪ Waiting for EverQuest to start. | Nothing. EQ Triage connects on its own within a few seconds of EverQuest starting. |
 | ⚪ EverQuest is starting. Waiting for Zeal's feed... | Nothing. Zeal takes a moment to start while the game loads. |
-| 🟠 EverQuest is running, but Zeal's feed wasn't found. | Zeal isn't loaded. Check that `Zeal.asi` is in your EverQuest folder and restart EverQuest. When Zeal is loaded, its commands (such as `/pipe`) work in game. With several EverQuest windows open, the message says how many are missing it. |
+| 🟠 EverQuest is running, but Zeal's feed wasn't found. | Zeal isn't loaded. Check that `Zeal.asi` is in your EverQuest folder and restart EverQuest. When Zeal is loaded, its commands (such as `/pipe`) work in game. |
 | ⚪ Connected. Waiting for you to enter Norrath. | Nothing. You're at character select; data starts when you log in. |
 | 🟠 Health data is off. Type /pipeverbose on in game. | Type `/pipeverbose on` in game (once; Zeal remembers it). The overlay also shows a grey reminder row. |
 | 🟢 Receiving data from Sebik. Join a group or raid to see other players. | Working. Only you and your pets can show until you group or raid. |
-| 🟢 Receiving data from Sebik. | Everything is working. Every connected character is listed by name; if one of your boxes is missing, its EverQuest window isn't connected yet. |
+| 🟢 Receiving data from Sebik. | Everything is working. |
 
 - **Overlay is empty while the status is green:** that's normal when nobody is hurt. Click **Preview** to check it's on screen, or set **All classes** to warning below 100% under **Configure health thresholds** for a moment to see real data flowing.
 - **Can't see the overlay at all:** check **Show window** is ticked under *Triage overlay*, then click **Re-center**.
