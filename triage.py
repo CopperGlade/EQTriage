@@ -235,10 +235,10 @@ LEGACY_LEVELS = (50, 30)
 # Event key -> (label in the EQ Triage window, shown by default, sound on by default; None when it has no sound).
 EVENTS = {
     'low': ('Warning health (yellow)', True, False),
-    'critical': ('Critical health (red)', True, False),
+    'critical': ('Critical health (red)', True, True),
     'charm_break': ('Charm break', True, True),
     'charmer_hit': ('Charmer hit', True, True),
-    'dropping': ('Dropping fast (\u25bc)', True, False),
+    'dropping': ('Dropping fast (\u25bc)', True, True),
     'death': ('Death', True, False),
     'pets': ('Pets', True, None),
 }
@@ -758,9 +758,9 @@ def target_row(settings, origin, now):
 def snapshot(settings, now):
     # What the overlay and the sounds both work from, with switched-off event types left out. Needs state_lock.
     show = settings['show']
-    # Your own characters (one per connected EverQuest window) are left out, since you can see your own health bar,
-    # unless Include your own character is ticked; a pinned one still shows its health. Their pets always show,
-    # because only their own client reports them.
+    # Your own characters (one per connected EverQuest window) are listed like anyone else unless Include your own
+    # character is unticked, since you can see your own health bar; a pinned one still shows its health. Their pets
+    # always show, because only their own client reports them.
     own = set() if settings['include_self'] else set(pipe_characters.values())
     hp = {name: pct for name, (pct, seen) in members.items() if now - seen < STALE_SECONDS}
     member_limits = {name: limits(settings, name) for name in hp}
@@ -1119,7 +1119,7 @@ def load_settings():
     settings['target_window'] = saved.get('target_window') is not False
     settings['triage_window'] = saved.get('triage_window') is not False
     settings['distance_warning'] = saved.get('distance_warning') is not False
-    settings['include_self'] = saved.get('include_self') is True
+    settings['include_self'] = saved.get('include_self') is not False
     rate = saved.get('drop_rate')
     valid = isinstance(rate, (int, float)) and not isinstance(rate, bool)
     settings['drop_rate'] = min(max(int(rate), DROP_RATE_RANGE[0]), DROP_RATE_RANGE[1]) if valid else DEFAULT_DROP_RATE
@@ -1725,8 +1725,8 @@ class ControlWindow(QWidget):
         thresholds_button.setToolTip('Set the warning and critical health levels for each class and for pets.')
         thresholds_button.clicked.connect(lambda: self.open_dialog('thresholds', lambda: ThresholdsDialog(self)))
         self.scope_button = QPushButton()
-        self.scope_button.setToolTip('In a raid, select the groups you want to monitor. Your own group (the character '
-                                     'in the active EQ window) and pinned players are always monitored.')
+        self.scope_button.setToolTip('In a raid, select the groups you want to monitor. Your own group and pinned '
+                                     'players are always monitored.')
         self.scope_button.clicked.connect(self.pick_groups)
         self.show_scope()
         # The Scope row spans the box, since its text can list several groups.
@@ -1921,7 +1921,7 @@ class ControlWindow(QWidget):
         self.overlay.settings['thresholds'] = default_thresholds()
         self.overlay.settings.update(event_defaults({}))
         self.distance_box.setChecked(True)
-        self.self_box.setChecked(False)
+        self.self_box.setChecked(True)
         self.show_header_box.setChecked(True)
         self.target_header_box.setChecked(True)
         self.target_box.setChecked(True)

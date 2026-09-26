@@ -48,7 +48,7 @@ Long names are shortened with … so the health and tags always stay visible.
 
 Group and raid members show in yellow once they drop below their class's warning level and in red below its critical level: 40% / 25% for melee, 60% / 40% for hybrid casters and 75% / 50% for pure casters by default, since they die very fast. Both levels can be changed per class under **Configure health thresholds**. Your own pets and your group members' pets are included, sorted in with the players by health. Raid members' pets aren't, because Zeal doesn't send them.
 
-Your own character isn't listed by default, since you can see your own health bar. Tick **Include your own character** in the Alerts section to list it like any other player: low and critical health, dropping fast and death, with their sounds. Its health comes from your own HP bar, so it works in a group as well as a raid, even without `/pipeverbose`. Your class is read from the game too, so your own character uses its class's levels whether you're solo, grouped or raiding. It never gets a distance tag. Your pets always show. With the box unticked, pin your own character to see its health anyway.
+Your own character is listed like any other player: low and critical health, dropping fast, death and charm alerts, with their sounds. Its health comes from your own HP bar, so it works solo, in a group and in a raid, even without `/pipeverbose`. Your class is read from the game too, so your own character uses its class's levels wherever you are. It never gets a distance tag. Since you can see your own health bar, you can untick **Include your own character** in the Alerts section to leave it off; your pets still show, and you can pin your own character to see its health anyway.
 
 ### Dropping fast
 
@@ -92,13 +92,13 @@ Any health drop counts, including ones the charmer causes, such as a necromancer
 
 ### Deaths
 
-When the game reports a group or raid member slain (or *You have been slain* / *You died* on one of your own characters), a purple `DEAD name` row shows for 10 seconds. It replaces that player's other rows. Deaths only register if one of your EverQuest windows saw the message.
+When the game reports a group or raid member slain (or *You have been slain* / *You died* for your own character), a purple `DEAD name` row shows for 10 seconds. It replaces that player's other rows. Deaths only register if the message shows in your chat.
 
 ### Distance warnings
 
 Listed players farther from your character than the **Show distance beyond** setting (70 units by default) show how far away they are, e.g. `Sebik 38% (150 away)`. That tells you before you start a long heal whether it can land, and whether they need to take a step closer or are across the zone. The distance is rounded to the nearest 10 so it doesn't flicker as people move.
 
-Distance is measured from whichever EverQuest window is active, so it follows you when you switch characters. The 70-unit default warns a little before the edge of the main cleric heals:
+Distance is measured from your character. The 70-unit default warns a little before the edge of the main cleric heals:
 
 | Spell | Range |
 |---|---|
@@ -123,7 +123,7 @@ Both cutoffs are set in the *Distance overlay* section, so other classes can mat
 > [!IMPORTANT]
 > The Distance overlay needs **Zeal 1.4.6 or later**, the first version that says what you're targeting. With an older Zeal it stays empty.
 >
-> The distance is only known for **player characters in your group or raid**. Zeal sends positions for nobody else, so a mob, any pet (including your own) or a player outside your group and raid shows `--` instead of a distance, and no target leaves the row empty. The section in the EQ Triage window says the same. The Distance overlay follows the character in the active EverQuest window and is dragged by its own header, with its own **Re-center**, **Lock position**, **Show header bar**, text size, background opacity and **Preview**, so it can be tuned for its spot beside the target window without touching the list. Nothing is shared between the two overlays.
+> The distance is only known for **player characters in your group or raid**. Zeal sends positions for nobody else, so a mob, any pet (including your own) or a player outside your group and raid shows `--` instead of a distance, and no target leaves the row empty. The section in the EQ Triage window says the same. The Distance overlay is dragged by its own header, with its own **Re-center**, **Lock position**, **Show header bar**, text size, background opacity and **Preview**, so it can be tuned for its spot beside the target window without touching the list. Nothing is shared between the two overlays.
 
 ### Pinning
 
@@ -194,12 +194,14 @@ The **Dropping fast (▼)** row also sets how fast is fast: 15% HP per second by
 | Alert | Shown by default | Sound on by default | Default sound |
 |---|---|---|---|
 | Warning health (yellow) | Yes | No | Soft ping |
-| Critical health (red) | Yes | No | Double chirp |
+| Critical health (red) | Yes | **Yes** | Double chirp |
 | Charm break | Yes | **Yes** | Rising chime |
 | Charmer hit | Yes | **Yes** | Klaxon |
 | Death | Yes | No | Low gong |
-| Dropping fast (▼) | Yes | No | Alarm pulses |
+| Dropping fast (▼) | Yes | **Yes** | Alarm pulses |
 | Pets | Yes | — | — |
+
+If you set up EQ Triage before version 1.3.0, your saved sound switches stay as they were, so Critical health and Dropping fast stay silent until you tick them here or press **Restore defaults**.
 
 Pets have no sound of their own: a pet at low health sounds through the Warning or Critical health sound when that one is on, like a player would.
 
@@ -227,7 +229,7 @@ The list is sorted by how close each person is to their own critical level, so a
 | Setting | Default | What it does |
 |---|---|---|
 | Scope | Entire raid | In a raid, which raid groups' alerts show. Untick groups to hide them; your own group always shows. See [Raid focus](#raid-focus). |
-| Include your own character | Off | Lists your own character like any other player, with its alerts and sounds. See [Warning and critical health](#warning-and-critical-health). |
+| Include your own character | On | Lists your own character like any other player, with its alerts and sounds. Untick it to leave your own character off. See [Warning and critical health](#warning-and-critical-health). |
 | Show distance beyond | On, 70 units | Listed players farther away than this show their distance, e.g. `(150 away)`. Untick it to turn distance warnings off. |
 
 Click an overlay's **Preview** while you adjust its **Other settings** to see the effect. **Restore defaults**, at the bottom of the window, asks you to confirm and then resets everything: every setting, including the alert types, sounds, class thresholds and both overlays' looks, plus both overlays' positions and locks, and it removes all pinned players.

@@ -246,7 +246,8 @@ def test_pets_are_listed_with_players_and_cannot_be_pinned(settings):
     assert rows[0][4] is None
 
 
-def test_own_characters_are_never_listed_unless_pinned(clock, settings):
+def test_own_characters_are_not_listed_unless_pinned_with_include_self_off(clock, settings):
+    settings['include_self'] = False
     triage.pipe_characters[PIPE] = 'Sebik'
     triage.handle_members([member('Mera', 15)], PIPE)
     triage.handle_own_hp([gauge(triage.PLAYER_HP_GAUGE, '', 150)], 'Sebik', PIPE)
@@ -257,7 +258,7 @@ def test_own_characters_are_never_listed_unless_pinned(clock, settings):
 
 
 def test_include_your_own_character_lists_and_sounds_it(clock, settings):
-    settings['include_self'] = True
+    assert settings['include_self'] is True
     triage.pipe_characters[PIPE] = 'Sebik'
     triage.handle_own_hp([gauge(triage.PLAYER_HP_GAUGE, '', 150)], 'Sebik', PIPE)
     assert names(triage.alert_rows(settings, [])) == [('', 'Sebik', ' 15%')]
@@ -731,7 +732,13 @@ def test_defaults_when_nothing_is_saved(settings):
     assert settings['thresholds']['Pets'] == {'list': 40, 'red': 25}
     assert settings['drop_rate'] == 15
     assert settings['hidden_groups'] == [] and not settings['locked'] and settings['distance_warning']
-    assert settings['include_self'] is False
+    assert settings['include_self'] is True
+
+
+def test_critical_and_dropping_sound_by_default(settings):
+    assert settings['sound'] == {
+        'low': False, 'critical': True, 'charm_break': True, 'charmer_hit': True, 'dropping': True, 'death': False,
+    }
 
 
 def test_saved_values_are_clamped_and_bad_types_ignored(tmp_path):
@@ -916,15 +923,16 @@ def make_control(settings):
     return triage.ControlWindow(triage.TriageWindow(settings), triage.TargetWindow(settings))
 
 
-def test_include_your_own_character_is_saved_off_by_default_and_restored(qapp, settings, tmp_path):
+def test_include_your_own_character_is_saved_on_by_default_and_restored(qapp, settings, tmp_path):
     control = make_control(settings)
-    assert not control.self_box.isChecked()
-    control.self_box.setChecked(True)
-    assert settings['include_self'] is True and triage.load_settings()['include_self'] is True
-    (tmp_path / 'settings.json').write_text(json.dumps({'include_self': 'yes'}))
-    assert triage.load_settings()['include_self'] is False
+    assert control.self_box.isChecked()
+    control.self_box.setChecked(False)
+    assert settings['include_self'] is False and triage.load_settings()['include_self'] is False
+    (tmp_path / 'settings.json').write_text(json.dumps({'include_self': 'no'}))
+    assert triage.load_settings()['include_self'] is True, 'anything but False keeps it on'
+    control.self_box.setChecked(False)
     control.apply_defaults()
-    assert settings['include_self'] is False and not control.self_box.isChecked()
+    assert settings['include_self'] is True and control.self_box.isChecked()
 
 
 def test_configure_windows_hold_the_spins_and_apply_live(qapp, settings):
