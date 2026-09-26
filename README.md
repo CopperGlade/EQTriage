@@ -1,6 +1,6 @@
 # EQ Triage
 
-A healer's overlay for Project Quarm · v1.2.0 · by Sebik &lt;Europa&gt;
+A healer's overlay for Project Quarm · v1.3.0 · by Sebik &lt;Europa&gt;
 
 EQ Triage sits on top of EverQuest and lists the people who need attention: players and pets at low health, charm breaks, charmers being hit, deaths, and anyone too far away to heal. It only reads game data and draws on screen. It never presses keys or clicks for you.
 
@@ -246,7 +246,7 @@ Everything lives in the `EQTriage` folder:
 
 Only one EQ Triage runs at a time. Starting it again while it's running just shows a note and leaves the first one alone.
 
-The EQ Triage window shows the version you're running next to its name. Each time it starts, it asks GitHub whether there's a newer release, and if so a line appears under the status: *EQ Triage 1.3.0 is available. Download it*. That request is the only thing EQ Triage sends over the internet, and it sends nothing about you or your characters. Without an internet connection the check is simply skipped.
+The EQ Triage window shows the version you're running next to its name. Each time it starts, it asks GitHub whether there's a newer release, and if so a line appears under the status: *EQ Triage 1.4.0 is available. Download it*. That request is the only thing EQ Triage sends over the internet, and it sends nothing about you or your characters. Without an internet connection the check is simply skipped.
 
 To update EQ Triage, quit it, download the [latest release](https://github.com/CopperGlade/EQTriage/releases/latest) and extract it over the old folder. Only `EQTriage.exe` is replaced; your `.json` files are kept. To uninstall, delete the folder.
 
