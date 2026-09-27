@@ -184,9 +184,9 @@ def test_loose_pet_row_follows_every_charm_row_including_pinned(clock, settings)
     rows = [row for row in triage.alert_rows(settings, ['Sebik']) if row[1]]
     assert rows == [
         (triage.CHARM_BREAK_PREFIX, 'Sebik', '', triage.CHARMER_COLOR, 'Sebik'),
-        (triage.PET_ROW_PREFIX, 'Quillmane', '', triage.CHARMER_COLOR, None),
+        (triage.PET_ROW_PREFIX, 'Quillmane', '', triage.PET_ROW_COLOR, None),
         (triage.CHARM_BREAK_PREFIX, 'Mera', '', triage.CHARMER_COLOR, 'Mera'),
-        (triage.PET_ROW_PREFIX, 'a Soriz Slave', '', triage.CHARMER_COLOR, None),
+        (triage.PET_ROW_PREFIX, 'a Soriz Slave', '', triage.PET_ROW_COLOR, None),
     ]
 
 
@@ -994,3 +994,14 @@ def test_long_names_are_elided_but_tags_stay(qapp, settings):
     window = triage.TriageWindow(settings)
     text = window.fit('', 'Sebik' * 10, ' 38% (150 away)')
     assert text.endswith(' 38% (150 away)') and '…' in text
+
+
+def test_loose_pet_row_is_lighter_than_the_alert_above_it(qapp, settings):
+    from PySide6.QtGui import QFont
+    window = triage.TriageWindow(settings)
+    assert window.font_for(triage.PET_ROW_PREFIX)[0].weight() == QFont.Normal
+    assert window.font_for(triage.CHARM_BREAK_PREFIX)[0].weight() == QFont.DemiBold
+    assert window.font_for('')[0].weight() == QFont.DemiBold
+    assert triage.PET_ROW_COLOR != triage.CHARMER_COLOR
+    text = window.fit(triage.PET_ROW_PREFIX, 'a Soriz Slave' * 5, '')
+    assert '…' in text and window.pet_metrics.horizontalAdvance(text) <= window.text_width

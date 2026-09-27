@@ -33,7 +33,7 @@ The overlay has 8 rows by default (adjustable from 3 to 25 under **Other setting
 | `Sebik pet 40%` | Yellow | Sebik's pet below the pets' warning level, 40% by default (red below the 25% critical level). |
 | `CHARM BREAK Sebik` | Red | Sebik's charmed pet just broke free. Shown for 6 seconds. |
 | `CHARMER HIT Sebik 80%` | Red | Sebik is taking damage after a charm break, probably from the freed pet. This is the most urgent row. |
-| `A Soriz Slave`, indented | Red | The pet that broke free, on the row under each `CHARM BREAK` and `CHARMER HIT`: the mob to stun or re-charm. It takes up one of the overlay's rows. |
+| `A Soriz Slave`, indented | Soft red | The pet that broke free, on the row under each `CHARM BREAK` and `CHARMER HIT`: the mob to stun or re-charm. Its lighter text keeps it below the alert it belongs to. It takes up one of the overlay's rows. |
 | `DEAD Sebik` | Purple | Sebik died. Shown for 10 seconds. |
 | `Sebik 70% ▼` | Yellow | Sebik is losing health fast (more than 15% per second over at least two hits by default), listed even above their warning level. |
 | `Sebik 38% (150 away)` | Yellow | A distance warning: 150 units from you, farther than the distance warning setting (70 units by default). |
@@ -68,7 +68,7 @@ Pinned players always show, whatever the setting, and so do ungrouped raid membe
 
 When a group member's pet health bar disappears while the pet still had more than 10% health, EQ Triage reports `CHARM BREAK name`. A bar that vanishes at low health counts as the pet dying and is ignored. This works for your group only, not the entire raid.
 
-The row under it, indented, names the pet that broke free, so an enchanter knows which mob to stun:
+The row under it, indented and in lighter, softer red text so it doesn't compete with the alert, names the pet that broke free, so an enchanter knows which mob to stun:
 
 ```
 CHARM BREAK Sebik

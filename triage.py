@@ -87,6 +87,8 @@ EVENT_SPACING = 10
 EVENT_LINE_SPACING = 4
 MAX_BUFFER = 1_000_000
 CHARMER_COLOR = '#ff0000'
+# The loose pet's row is detail under the charm alert: the same red family, softened, and drawn at regular weight.
+PET_ROW_COLOR = '#d08a8a'
 LOW_HP_COLOR = '#ffff00'
 CRITICAL_HP_COLOR = '#ff0000'
 DEATH_COLOR = '#b877ff'
@@ -104,7 +106,7 @@ SAMPLE_ROWS = [
     ('', 'Sebik', ' 95%', PINNED_COLOR, None),
     (CHARMER_HIT_PREFIX, 'Sebik', ' 80%', CHARMER_COLOR, None),
     (CHARM_BREAK_PREFIX, 'Sebik', '', CHARMER_COLOR, None),
-    (PET_ROW_PREFIX, 'A Soriz Slave', '', CHARMER_COLOR, None),
+    (PET_ROW_PREFIX, 'A Soriz Slave', '', PET_ROW_COLOR, None),
     ('DEAD ', 'Sebik', '', DEATH_COLOR, None),
     ('', 'Sebik', ' 22%', CRITICAL_HP_COLOR, None),
     ('', 'Sebik', ' pet 41%', LOW_HP_COLOR, None),
@@ -714,7 +716,7 @@ def with_loose_pets(rows, loose_pets):
         out.append(row)
         pet = loose_pets.get(row[4])
         if row[0] in CHARMER_PREFIXES and pet:
-            out.append((PET_ROW_PREFIX, pet, '', CHARMER_COLOR, None))
+            out.append((PET_ROW_PREFIX, pet, '', PET_ROW_COLOR, None))
     return out
 
 
@@ -1219,6 +1221,8 @@ class TriageWindow(QWidget):
     def apply_font(self):
         self.row_font = QFont(FONT_FAMILY, self.font_size(), QFont.DemiBold)
         self.metrics = QFontMetrics(self.row_font)
+        self.pet_font = QFont(FONT_FAMILY, self.font_size(), QFont.Normal)
+        self.pet_metrics = QFontMetrics(self.pet_font)
         self.row_height = self.metrics.height() + ROW_GAP
         # Never narrower than the title, so a small text size can't clip the header.
         self.text_width = max(self.metrics.horizontalAdvance('0') * self.width_chars(),
@@ -1424,12 +1428,12 @@ class TriageWindow(QWidget):
             painter.setFont(self.title_font)
             painter.drawText(header, Qt.AlignVCenter | Qt.AlignLeft, self.title_text())
 
-        painter.setFont(self.row_font)
         for i, (prefix, name, suffix, color, key) in enumerate(self.rows):
             if not name:
                 continue
             cell = QRectF(PADDING, HEADER_HEIGHT + i * self.row_height, self.text_width, self.row_height)
             text = self.fit(prefix, name, suffix)
+            painter.setFont(self.font_for(prefix)[0])
             painter.setPen(SHADOW_COLOR)
             painter.drawText(cell.translated(1, 1), Qt.AlignVCenter | Qt.AlignLeft, text)
             painter.setPen(QColor(color))
@@ -1448,9 +1452,16 @@ class TriageWindow(QWidget):
         painter.drawEllipse(QPointF(x, y - 2), 3, 3)
         painter.setBrush(Qt.NoBrush)
 
+    def font_for(self, prefix):
+        # The loose pet's row is lighter than the alert above it; every other row is semi-bold.
+        if prefix == PET_ROW_PREFIX:
+            return self.pet_font, self.pet_metrics
+        return self.row_font, self.metrics
+
     def fit(self, prefix, name, suffix):
-        room = self.text_width - self.metrics.horizontalAdvance(prefix + suffix)
-        return prefix + self.metrics.elidedText(name, Qt.ElideRight, room) + suffix
+        metrics = self.font_for(prefix)[1]
+        room = self.text_width - metrics.horizontalAdvance(prefix + suffix)
+        return prefix + metrics.elidedText(name, Qt.ElideRight, room) + suffix
 
     def mousePressEvent(self, event):
         if event.button() != Qt.LeftButton:
