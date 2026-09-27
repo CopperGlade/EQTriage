@@ -66,7 +66,7 @@ CHARM_BREAK_PREFIX = 'CHARM BREAK '
 CHARMER_HIT_PREFIX = 'CHARMER HIT '
 # Rows with these prefixes are followed by the loose pet's name, indented, so an enchanter knows what to stun.
 CHARMER_PREFIXES = (CHARM_BREAK_PREFIX, CHARMER_HIT_PREFIX)
-PET_ROW_PREFIX = '  '
+PET_ROW_PREFIX = '    '
 UNTAGGED_PREFIXES = ('DEAD ', CHARM_BREAK_PREFIX)
 DROP_MARKED_PREFIXES = ('', CHARMER_HIT_PREFIX)
 SCAN_SECONDS = 5.0

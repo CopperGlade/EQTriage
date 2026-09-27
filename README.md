@@ -72,7 +72,7 @@ The row under it, indented, names the pet that broke free, so an enchanter knows
 
 ```
 CHARM BREAK Sebik
-  A Soriz Slave
+    A Soriz Slave
 ```
 
 The pet's row stays under the charmer's row when it turns into `CHARMER HIT`, since that pet is usually the one doing the hitting.
