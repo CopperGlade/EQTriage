@@ -126,6 +126,9 @@ DROP_RATE_RANGE = (3, 50)
 # Scope setting: the entire raid shows unless raid groups are unticked; the active character's own group always shows.
 RAID_GROUPS = 12
 RAID_GROUP_COLUMNS = 4
+CHARM_CLASS_COLUMNS = 3
+# The Charmer classes button is wide enough for these without cutting them short; a longer list is elided on it.
+CHARM_BUTTON_FITS = ('Bard', 'Druid', 'Enchanter', 'Necromancer')
 # Pins are capped at the most rows the overlay can show; with fewer rows set, only the first pins fit.
 MAX_PINS = 25
 DEFAULT_Y = 150
@@ -213,8 +216,9 @@ def class_key(text):
 CLASS_NUMBERS = {class_key(name): number for number, name in CLASSES.items()}
 # Health thresholds are set per class. Pets have no class in Zeal's data, and a player's class can be unknown
 # for a moment while data arrives, so both get their own entry.
-# The only classes that charm at high level; other classes losing a pet is never a charm break.
-CHARM_CLASSES = ('Bard', 'Enchanter', 'Necromancer')
+# The classes whose lost pets count as charm breaks until the player picks others (Charmer classes): the ones that
+# charm at high level.
+DEFAULT_CHARM_CLASSES = ('Bard', 'Enchanter', 'Necromancer')
 # Every name the Project Quarm server can generate for a summoned pet: one fragment from each slot, the middle two
 # optional (EQMacEmu common/name_generator.cpp, pet table).
 SUMMONED_PET_NAME = re.compile(r'^[GJKLVXZ](?:ab|on|ib|as|ar|ob|eb|en)?(?:ar|an|ek|ob)?(?:tik|er|n|ab)$')
@@ -424,19 +428,24 @@ def clean_pet_name(pet_name):
 
 
 def could_be_charm(owner, pet_name):
-    # A vanished pet only counts as a charm break if its owner is a class that charms at high level and the pet
-    # isn't a summoned one. The Project Quarm server names summoned pets either with a generated name matching
-    # SUMMONED_PET_NAME (e.g. Gabartik) or after the owner (Sebik`s pet, `s familiar, `s warder). Charmed mobs keep
-    # their own name, one word or several (Quillmane, a Shissar Defiler). An unknown class or name doesn't rule it
-    # out, so a real break is never missed just because that data hadn't arrived.
-    with state_lock:
-        owner_class = member_classes.get(owner)
-    if owner_class is not None and CLASSES[owner_class] not in CHARM_CLASSES:
-        return False
+    # A vanished pet only counts as a charm break if it isn't a summoned one. The Project Quarm server names summoned
+    # pets either with a generated name matching SUMMONED_PET_NAME (e.g. Gabartik) or after the owner (Sebik`s pet,
+    # `s familiar, `s warder). Charmed mobs keep their own name, one word or several (Quillmane, a Shissar Defiler).
+    # An unknown name doesn't rule it out. The owner's class is checked when the break is shown (counts_as_charmer).
     name = clean_pet_name(pet_name)
     if not name:
         return True
     return not SUMMONED_PET_NAME.match(name) and not name.lower().startswith(f'{owner.lower()}`s ')
+
+
+def counts_as_charmer(settings, owner):
+    # Whether a charm break, and a charmer hit after it, from this owner is shown and sounds: their class is ticked
+    # under Charmer classes. An unknown class counts, so a real break is never missed just because that data hadn't
+    # arrived, unless no class is ticked at all. Needs state_lock.
+    number = member_classes.get(owner)
+    if number is None:
+        return bool(settings['charm_classes'])
+    return CLASSES[number] in settings['charm_classes']
 
 
 class PetWatcher:
@@ -769,14 +778,17 @@ def snapshot(settings, now):
     dead = sorted(
         name for name, at in deaths.items() if now - at < DEATH_SECONDS and name not in own
     ) if show['death'] else []
+    # A charmer hit only follows a charm break, so both leave out owners whose class isn't a ticked charmer class.
     charmers_hit = sorted(
         (name for name, hit in charmer_hits.items()
-         if now - hit < CHARMER_HIT_SECONDS and name not in dead and name not in own),
+         if now - hit < CHARMER_HIT_SECONDS and name not in dead and name not in own
+         and counts_as_charmer(settings, name)),
         key=lambda n: hp.get(n, 100),
     ) if show['charmer_hit'] else []
     breaks = [
         owner for owner, (_, at) in charm_breaks.items()
         if now - at < ALERT_SECONDS and owner not in charmers_hit and owner not in dead and owner not in own
+        and counts_as_charmer(settings, owner)
     ] if show['charm_break'] else []
     # Name -> current rate for everyone marked as dropping fast (see update_dropping).
     dropping = {}
@@ -1127,6 +1139,10 @@ def load_settings():
     settings['drop_rate'] = min(max(int(rate), DROP_RATE_RANGE[0]), DROP_RATE_RANGE[1]) if valid else DEFAULT_DROP_RATE
     groups = saved.get('hidden_groups') if isinstance(saved.get('hidden_groups'), list) else []
     settings['hidden_groups'] = sorted({g for g in groups if isinstance(g, int) and 1 <= g <= RAID_GROUPS})
+    classes = saved.get('charm_classes')
+    known = set(CLASSES.values())
+    settings['charm_classes'] = (sorted({c for c in classes if isinstance(c, str) and c in known})
+                                 if isinstance(classes, list) else list(DEFAULT_CHARM_CLASSES))
     settings.update(event_defaults(saved))
     return settings
 
@@ -1610,6 +1626,15 @@ def scope_text(hidden):
     return f'All but {listing(hidden)}'
 
 
+def charm_classes_text(classes):
+    # What the Charmer classes button reads.
+    if not classes:
+        return 'None'
+    if len(classes) == len(CLASSES):
+        return 'All classes'
+    return ', '.join(sorted(classes))
+
+
 class ControlWindow(QWidget):
     # The normal window that owns the taskbar button and stays on the desktop EQ Triage was started on.
     # It holds the settings and pins; closing it quits the app.
@@ -1938,6 +1963,7 @@ class ControlWindow(QWidget):
         self.target_box.setChecked(True)
         self.triage_box.setChecked(True)
         self.overlay.settings['hidden_groups'] = []
+        self.overlay.settings['charm_classes'] = list(DEFAULT_CHARM_CLASSES)
         self.overlay.settings['drop_rate'] = DEFAULT_DROP_RATE
         # Locks and positions live outside SETTINGS, and pins in their own file; all of them go too.
         self.lock_box.setChecked(False)
@@ -2041,19 +2067,19 @@ class OverlayDialog(QDialog):
         self.control.couple_distance_spins()
 
 
-class RaidGroupsDialog(QDialog):
-    # Untick the raid groups to hide; all are ticked by default. Only used while choosing, so it asks and returns
-    # rather than saving live.
-    def __init__(self, parent, hidden):
+class ChecklistDialog(QDialog):
+    # A note over a grid of checkboxes, one per (value, label) item, filled row by row. Only used while choosing, so
+    # it asks and returns rather than saving live.
+    def __init__(self, parent, title, note, items, ticked, columns):
         super().__init__(parent)
-        self.setWindowTitle(f'{APP_NAME}: raid groups to monitor')
-        self.boxes = []
+        self.setWindowTitle(f'{APP_NAME}: {title}')
+        self.boxes = {}
         grid = QGridLayout()
-        for number in range(1, RAID_GROUPS + 1):
-            box = QCheckBox(f'Group {number}')
-            box.setChecked(number not in hidden)
-            grid.addWidget(box, (number - 1) // RAID_GROUP_COLUMNS, (number - 1) % RAID_GROUP_COLUMNS)
-            self.boxes.append(box)
+        for index, (value, label) in enumerate(items):
+            box = QCheckBox(label)
+            box.setChecked(value in ticked)
+            grid.addWidget(box, index // columns, index % columns)
+            self.boxes[value] = box
         ok_button = QPushButton('OK')
         ok_button.setDefault(True)
         ok_button.clicked.connect(self.accept)
@@ -2064,13 +2090,42 @@ class RaidGroupsDialog(QDialog):
         buttons.addWidget(ok_button)
         buttons.addWidget(cancel_button)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel('Select the groups you want to monitor.\nYour own group is always monitored.'))
+        layout.addWidget(QLabel(note))
         layout.addLayout(grid)
         layout.addLayout(buttons)
         fit_dialog(self)
 
+    def ticked(self):
+        return [value for value, box in self.boxes.items() if box.isChecked()]
+
+
+class RaidGroupsDialog(ChecklistDialog):
+    # Untick the raid groups to hide; all are ticked by default.
+    def __init__(self, parent, hidden):
+        groups = range(1, RAID_GROUPS + 1)
+        super().__init__(
+            parent, 'raid groups to monitor',
+            'Select the groups you want to monitor.\nYour own group is always monitored.',
+            [(number, f'Group {number}') for number in groups],
+            [number for number in groups if number not in hidden], RAID_GROUP_COLUMNS,
+        )
+
     def hidden(self):
-        return [number for number, box in enumerate(self.boxes, start=1) if not box.isChecked()]
+        return [number for number, box in self.boxes.items() if not box.isChecked()]
+
+
+class CharmClassesDialog(ChecklistDialog):
+    # Tick the classes whose lost pets count as charm breaks, in alphabetical order.
+    def __init__(self, parent, chosen):
+        super().__init__(
+            parent, 'charmer classes',
+            'Select the classes whose lost pets count as charm breaks.\n'
+            'A player whose class isn\'t known yet counts unless none is selected.',
+            [(name, name) for name in sorted(CLASSES.values())], chosen, CHARM_CLASS_COLUMNS,
+        )
+
+    def chosen(self):
+        return sorted(self.ticked())
 
 
 class AlertTypesDialog(QDialog):
@@ -2092,6 +2147,9 @@ class AlertTypesDialog(QDialog):
                                   'gets \u25bc after their health and is listed even above their warning level. '
                                   'A single big hit doesn\'t count.')
         self.drop_rate.valueChanged.connect(self.change_drop_rate)
+        self.charm_button = QPushButton(charm_classes_text(CHARM_BUTTON_FITS))
+        self.charm_button.setFixedWidth(self.charm_button.sizeHint().width())
+        self.charm_button.clicked.connect(self.pick_charm_classes)
         for index, (key, (label, _, has_sound)) in enumerate(EVENTS.items()):
             if index:
                 events.addSpacing(EVENT_SPACING)
@@ -2105,6 +2163,8 @@ class AlertTypesDialog(QDialog):
                 lines.append([self.make_box('sound', key, 'Play sound on event'), self.make_picker(key), test_button])
             if key == 'dropping':
                 lines.append([QLabel('Fast means losing more than'), self.drop_rate])
+            if key == 'charm_break':
+                lines.append([QLabel('Charmer classes'), self.charm_button])
             for widgets in lines:
                 line = QHBoxLayout()
                 line.addSpacing(EVENT_INDENT)
@@ -2178,6 +2238,7 @@ class AlertTypesDialog(QDialog):
         self.drop_rate.blockSignals(True)
         self.drop_rate.setValue(settings['drop_rate'])
         self.drop_rate.blockSignals(False)
+        self.show_charm_classes()
         for key, picker in self.pickers.items():
             picker.blockSignals(True)
             custom = settings['custom_sounds'].get(key)
@@ -2195,6 +2256,26 @@ class AlertTypesDialog(QDialog):
     def change_drop_rate(self, value):
         self.control.overlay.settings['drop_rate'] = value
         self.control.save_and_redraw()
+
+    def pick_charm_classes(self):
+        chooser = CharmClassesDialog(self, self.control.overlay.settings['charm_classes'])
+        if chooser.exec():
+            self.control.overlay.settings['charm_classes'] = chooser.chosen()
+            self.control.save_and_redraw()
+            self.show_charm_classes()
+
+    def show_charm_classes(self):
+        text = charm_classes_text(self.control.overlay.settings['charm_classes'])
+        button = self.charm_button
+        button.setText(text)
+        # The dialog keeps its size, so a list too long for the button is cut short there and given in full in the
+        # tooltip. The overflow is measured on the full text, which is always wider than a button's minimum size.
+        overflow = button.sizeHint().width() - button.maximumWidth()
+        if overflow > 0:
+            metrics = button.fontMetrics()
+            button.setText(metrics.elidedText(text, Qt.ElideRight, metrics.horizontalAdvance(text) - overflow))
+        button.setToolTip(f'{text}\n\nOnly these classes\' lost pets count as charm breaks, and so as charmer hits. '
+                          'A player whose class isn\'t known yet counts unless none is selected.')
 
 
 class BulkSpinBox(QSpinBox):

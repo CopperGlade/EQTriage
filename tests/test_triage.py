@@ -159,7 +159,7 @@ def test_a_fast_fall_ranks_above_a_steady_low(clock, settings):
 
 
 def test_rows_follow_the_documented_order(clock, settings):
-    triage.handle_members([member('Sebik', 20), member('Mera', 90)], PIPE)
+    triage.handle_members([member('Sebik', 20), member('Mera', 90, ENCHANTER)], PIPE)
     triage.charm_breaks['Mera'] = ('Quillmane', clock.now)
     triage.deaths['Sebik'] = clock.now
     rows = names(triage.alert_rows(settings, []))
@@ -169,7 +169,7 @@ def test_rows_follow_the_documented_order(clock, settings):
 
 
 def test_charmer_hit_shows_before_charm_break_and_carries_health(clock, settings):
-    triage.handle_members([member('Mera', 80)], PIPE)
+    triage.handle_members([member('Mera', 80, ENCHANTER)], PIPE)
     triage.charm_breaks['Mera'] = ('Quillmane', clock.now)
     triage.charmer_hits['Mera'] = clock.now
     assert names(triage.alert_rows(settings, [])) == [
@@ -178,7 +178,7 @@ def test_charmer_hit_shows_before_charm_break_and_carries_health(clock, settings
 
 
 def test_loose_pet_row_follows_every_charm_row_including_pinned(clock, settings):
-    triage.handle_members([member('Mera', 80), member('Sebik', 90)], PIPE)
+    triage.handle_members([member('Mera', 80, ENCHANTER), member('Sebik', 90, ENCHANTER)], PIPE)
     triage.charm_breaks['Mera'] = ('a_Soriz_Slave00', clock.now)
     triage.charm_breaks['Sebik'] = ('Quillmane', clock.now)
     rows = [row for row in triage.alert_rows(settings, ['Sebik']) if row[1]]
@@ -191,14 +191,14 @@ def test_loose_pet_row_follows_every_charm_row_including_pinned(clock, settings)
 
 
 def test_no_pet_row_without_a_pet_name(clock, settings):
-    triage.handle_members([member('Mera', 80)], PIPE)
+    triage.handle_members([member('Mera', 80, ENCHANTER)], PIPE)
     triage.charm_breaks['Mera'] = ('', clock.now)
     assert names(triage.alert_rows(settings, [])) == [(triage.CHARM_BREAK_PREFIX, 'Mera', '')]
 
 
 def test_pet_rows_count_toward_the_row_limit(clock, settings):
     settings['rows'] = 3
-    triage.handle_members([member('Mera', 80), member('Sebik', 80)], PIPE)
+    triage.handle_members([member('Mera', 80, ENCHANTER), member('Sebik', 80, ENCHANTER)], PIPE)
     triage.charm_breaks['Mera'] = ('Quillmane', clock.now)
     triage.charm_breaks['Sebik'] = ('a Soriz Slave', clock.now)
     assert names(triage.alert_rows(settings, [])) == [
@@ -373,7 +373,7 @@ def test_no_distance_without_own_position_or_when_switched_off(settings):
 def test_dead_and_charm_break_rows_are_never_tagged(clock, settings):
     triage.own_locations[PIPE] = ((0, 0, 0), clock.now)
     triage.member_locations[(PIPE, 'Mera')] = ((900, 0, 0), clock.now)
-    triage.handle_members([member('Mera', 30)], PIPE)
+    triage.handle_members([member('Mera', 30, ENCHANTER)], PIPE)
     triage.deaths['Mera'] = clock.now
     assert names(triage.alert_rows(settings, [], PIPE)) == [('DEAD ', 'Mera', '')]
     del triage.deaths['Mera']
@@ -387,6 +387,7 @@ def test_pet_row_is_bare_while_its_charmer_hit_row_is_marked_and_tagged(clock, s
     triage.own_locations[PIPE] = ((0, 0, 0), clock.now)
     triage.member_locations[(PIPE, 'Mera')] = ((145, 0, 0), clock.now)
     fall('Mera', (100, 90, 80), clock)
+    triage.member_classes['Mera'] = ENCHANTER
     triage.charm_breaks['Mera'] = ('Quillmane', clock.now)
     triage.charmer_hits['Mera'] = clock.now
     triage.update_dropping(settings)
@@ -551,22 +552,52 @@ def test_distance_overlay_is_the_same_with_or_without_its_header(qapp, settings)
 # Charm breaks
 
 
-@pytest.mark.parametrize('owner_class, pet, expected', [
-    (ENCHANTER, 'Quillmane', True),
-    (ENCHANTER, 'a Shissar Defiler', True),
-    (ENCHANTER, 'a_Shissar_Defiler00', True),
-    (ENCHANTER, 'Gabartik', False),
-    (ENCHANTER, 'Xebekn', False),
-    (ENCHANTER, 'Sebik`s pet', False),
-    (ENCHANTER, 'Sebik`s familiar', False),
-    (WARRIOR, 'Quillmane', False),
-    (None, 'Quillmane', True),
-    (None, '', True),
+@pytest.mark.parametrize('pet, expected', [
+    ('Quillmane', True),
+    ('a Shissar Defiler', True),
+    ('a_Shissar_Defiler00', True),
+    ('Gabartik', False),
+    ('Xebekn', False),
+    ('Sebik`s pet', False),
+    ('Sebik`s familiar', False),
+    ('', True),
 ])
-def test_could_be_charm(owner_class, pet, expected):
-    if owner_class is not None:
-        triage.member_classes['Sebik'] = owner_class
+def test_could_be_charm(pet, expected):
     assert triage.could_be_charm('Sebik', pet) is expected
+
+
+def test_charmer_classes_decide_whose_breaks_and_hits_count(clock, settings):
+    triage.handle_members([member('Mera', 80), member('Sebik', 90, ENCHANTER)], PIPE)
+    triage.charm_breaks['Mera'] = ('Quillmane', clock.now)
+    triage.charmer_hits['Mera'] = clock.now
+    triage.charm_breaks['Sebik'] = ('a Soriz Slave', clock.now)
+    assert names(triage.alert_rows(settings, [])) == [
+        (triage.CHARM_BREAK_PREFIX, 'Sebik', ''), (triage.PET_ROW_PREFIX, 'a Soriz Slave', ''),
+    ]
+    assert triage.current_events(settings) == {('charm_break', 'Sebik')}
+    settings['charm_classes'] = ['Warrior']
+    assert names(triage.alert_rows(settings, [])) == [
+        (triage.CHARMER_HIT_PREFIX, 'Mera', ' 80%'), (triage.PET_ROW_PREFIX, 'Quillmane', ''),
+    ]
+    assert triage.current_events(settings) == {('charmer_hit', 'Mera')}
+
+
+def test_an_unknown_class_counts_unless_no_class_is_selected(clock, settings):
+    triage.charm_breaks['Mera'] = ('Quillmane', clock.now)
+    assert names(triage.alert_rows(settings, []))[0] == (triage.CHARM_BREAK_PREFIX, 'Mera', '')
+    settings['charm_classes'] = []
+    assert names(triage.alert_rows(settings, [])) == []
+
+
+def test_charmer_classes_are_saved_and_cleaned(tmp_path, settings):
+    assert settings['charm_classes'] == ['Bard', 'Enchanter', 'Necromancer']
+    path = tmp_path / 'settings.json'
+    path.write_text(json.dumps({'charm_classes': ['Enchanter', 'Druid', 'Druid', 'Warlock', 7, None, ['x']]}))
+    assert triage.load_settings()['charm_classes'] == ['Druid', 'Enchanter']
+    path.write_text(json.dumps({'charm_classes': []}))
+    assert triage.load_settings()['charm_classes'] == []
+    path.write_text(json.dumps({'charm_classes': 'Druid'}))
+    assert triage.load_settings()['charm_classes'] == list(triage.DEFAULT_CHARM_CLASSES)
 
 
 def test_every_generated_pet_name_is_recognized():
@@ -976,10 +1007,49 @@ def test_restore_defaults_also_resets_positions_locks_and_pins(qapp, settings, t
     assert triage.load_position(triage.TARGET_POSITION_KEY) == control.target.default_position()
 
 
+def test_charmer_classes_are_picked_from_the_charm_break_row_and_restored(qapp, settings, monkeypatch):
+    control = make_control(settings)
+    chooser = triage.CharmClassesDialog(control, ['Bard'])
+    assert chooser.chosen() == ['Bard']
+    chooser.boxes['Druid'].setChecked(True)
+    assert chooser.chosen() == ['Bard', 'Druid']
+
+    def tick_druid(dialog):
+        dialog.boxes['Druid'].setChecked(True)
+        return True
+
+    monkeypatch.setattr(triage.CharmClassesDialog, 'exec', tick_druid)
+    control.open_dialog('alerts', lambda: triage.AlertTypesDialog(control))
+    button = control.dialogs['alerts'].charm_button
+    assert button.text() == 'Bard, Enchanter, Necromancer'
+    control.dialogs['alerts'].pick_charm_classes()
+    assert settings['charm_classes'] == ['Bard', 'Druid', 'Enchanter', 'Necromancer']
+    assert triage.load_settings()['charm_classes'] == settings['charm_classes']
+    assert button.text() == 'Bard, Druid, Enchanter, Necromancer', 'four classes fit without being cut short'
+    # A longer list is cut short on the button, which keeps its size, and given in full in the tooltip.
+    settings['charm_classes'] = sorted(triage.CLASSES.values())[:10]
+    control.dialogs['alerts'].show_charm_classes()
+    assert button.text().endswith('…') and button.sizeHint().width() <= button.maximumWidth()
+    assert button.toolTip().startswith(triage.charm_classes_text(settings['charm_classes']))
+    control.apply_defaults()
+    assert settings['charm_classes'] == list(triage.DEFAULT_CHARM_CLASSES)
+    assert button.text() == 'Bard, Enchanter, Necromancer'
+
+
+@pytest.mark.parametrize('classes, text', [
+    ([], 'None'),
+    (['Necromancer', 'Bard'], 'Bard, Necromancer'),
+    (list(triage.CLASSES.values()), 'All classes'),
+])
+def test_charm_classes_text(classes, text):
+    assert triage.charm_classes_text(classes) == text
+
+
 def test_every_dialog_is_sized_to_its_content(qapp, settings):
     control = make_control(settings)
     dialogs = [
         triage.AlertTypesDialog(control), triage.ThresholdsDialog(control), triage.RaidGroupsDialog(control, []),
+        triage.CharmClassesDialog(control, []),
         triage.OverlayDialog(control, 'triage overlay', triage.OVERLAY_SETTINGS),
     ]
     for dialog in dialogs:

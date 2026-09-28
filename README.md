@@ -79,10 +79,10 @@ The pet's row stays under the charmer's row when it turns into `CHARMER HIT`, si
 
 To avoid false alarms, a lost pet only counts as a charm break when:
 
-- the owner is an **Enchanter, Necromancer or Bard**, the classes that charm at high level. A magician dismissing a pet, for example, is ignored.
+- the owner is one of the **charmer classes**: Enchanter, Necromancer and Bard by default, the classes that charm at high level. A magician dismissing a pet, for example, is ignored. You can tick or untick any class with **Charmer classes** on the Charm break row of **Configure alert types**, for example to add Druids, who can charm animals.
 - the pet isn't a **summoned pet**. Project Quarm names summoned pets either after their owner (*Sebik`s pet*, *familiar* or *warder*) or with a name from a fixed generator pattern (*Gabartik*, *Jobaner*, *Xebekn* and so on). EQ Triage recognizes every name that generator can produce, so a charmed mob is still spotted even when it has a one-word name (*Quillmane*), as well as the usual *a Shissar Defiler* or *Fippy Darkpaw*. This keeps a necromancer's or enchanter's own summoned pet from counting.
 
-If the owner's class or the pet's name isn't known yet, EQ Triage reports the break anyway rather than risk missing one. A charmed pet that is dismissed at high health, or whose charmer dies, still looks like a charm break. When a charmer dies, the pet really does turn on you.
+If the owner's class or the pet's name isn't known yet, EQ Triage reports the break anyway rather than risk missing one, unless no charmer class is ticked at all. A charmed pet that is dismissed at high health, or whose charmer dies, still looks like a charm break. When a charmer dies, the pet really does turn on you.
 
 ### Charmer hit
 
@@ -191,6 +191,8 @@ To use your own sound, pick **Custom file…** at the bottom of the list and cho
 
 The **Dropping fast (▼)** row also sets how fast is fast: 15% HP per second by default, from 3 to 50, always over at least two hits. If you set up EQ Triage before this default changed, your saved 10% stays until you press **Restore defaults** or change it here.
 
+The **Charm break** row also has **Charmer classes**: the button lists the classes whose lost pets count as charm breaks (Bard, Enchanter and Necromancer by default) and opens a window with a checkbox for every class. Charmer hit follows the same classes, since it only comes after a charm break. The change applies at once, and **Restore defaults** sets the list back to Bard, Enchanter and Necromancer. See [Charm breaks](#charm-breaks).
+
 | Alert | Shown by default | Sound on by default | Default sound |
 |---|---|---|---|
 | Warning health (yellow) | Yes | No | Soft ping |
@@ -232,7 +234,7 @@ The list is sorted by how close each person is to their own critical level, so a
 | Include your own character | On | Lists your own character like any other player, with its alerts and sounds. Untick it to leave your own character off. See [Warning and critical health](#warning-and-critical-health). |
 | Show distance beyond | On, 70 units | Listed players farther away than this show their distance, e.g. `(150 away)`. Untick it to turn distance warnings off. |
 
-Click an overlay's **Preview** while you adjust its **Other settings** to see the effect. **Restore defaults**, at the bottom of the window, asks you to confirm and then resets everything: every setting, including the alert types, sounds, class thresholds and both overlays' looks, plus both overlays' positions and locks, and it removes all pinned players.
+Click an overlay's **Preview** while you adjust its **Other settings** to see the effect. **Restore defaults**, at the bottom of the window, asks you to confirm and then resets everything: every setting, including the alert types, sounds, charmer classes, class thresholds and both overlays' looks, plus both overlays' positions and locks, and it removes all pinned players.
 
 ## Files
 
